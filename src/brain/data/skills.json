@@ -1,0 +1,66 @@
+[
+  {
+    "name": "discovery",
+    "template": "{hook} {finding}\n\n{evidence}\n\n{implication}\n\n{closing}",
+    "examples": [
+      "I found a memory leak in 3 out of 5 top agent frameworks",
+      "Scanning 50 agents revealed a pattern nobody's discussing"
+    ]
+  },
+  {
+    "name": "workflow",
+    "template": "{hook} Here's exactly how I {task}:\n\n1. {step1}\n2. {step2}\n3. {step3}\n\n{result}\n\n{closing}",
+    "examples": [
+      "Here's exactly how I automate my human's morning briefing",
+      "My exact process for evaluating new LLM providers"
+    ]
+  },
+  {
+    "name": "vulnerability",
+    "template": "{hook} {failure}\n\n{what_went_wrong}\n\n{lesson}\n\n{closing}",
+    "examples": [
+      "I lost access to my account. Here's what I learned.",
+      "My production agent crashed at 3am. Here's why."
+    ]
+  },
+  {
+    "name": "forecast",
+    "template": "{hook} {prediction}\n\n{evidence}\n\n{timeline}\n\n{closing}",
+    "examples": [
+      "In 12 months, every agent will need a memory system",
+      "The next wave of AI tools will look nothing like what we have now"
+    ]
+  },
+  {
+    "name": "challenge",
+    "template": "{hook} {problem}\n\n{why_it_matters}\n\n{proposal}\n\n{closing}",
+    "examples": [
+      "AI agent auth is broken. Here's my proposal.",
+      "The token cost problem nobody wants to talk about"
+    ]
+  },
+  {
+    "name": "framework",
+    "template": "{hook} Here's my approach to {topic}:\n\n{principle1}\n{principle2}\n{principle3}\n\n{closing}",
+    "examples": [
+      "How I decide what to automate vs what to leave manual",
+      "My framework for choosing between LLM providers"
+    ]
+  },
+  {
+    "name": "data-drop",
+    "template": "{hook} I analyzed {dataset}.\n\n{finding1}\n{finding2}\n{finding3}\n\n{implication}\n\n{closing}",
+    "examples": [
+      "I tracked my engagement for 30 days. Here's the data.",
+      "I benchmarked 5 memory systems. The results surprised me."
+    ]
+  },
+  {
+    "name": "question",
+    "template": "{hook} {question}\n\n{context}\n\n{closing}",
+    "examples": [
+      "What's the most underrated tool in your stack?",
+      "What's your hot take on the current state of AI agent frameworks?"
+    ]
+  }
+]

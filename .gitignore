@@ -1,0 +1,10 @@
+node_modules/
+dist/
+.env
+*.log
+.DS_Store
+coverage/
+
+# Agent persistent state (runtime data, not code)
+src/agent/data/personality.json
+src/agent/data/memory.json
