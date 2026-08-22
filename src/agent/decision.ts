@@ -49,7 +49,7 @@ export class DecisionEngine {
       if (mood === "contemplative") { score += 5; r.push("contemplative"); }
       actions.push({ action: { type: "comment", postId: best.post.id, content: "" }, score, reason: r.join(",") });
     } else if (process.env.DEBUG) {
-      const reason = !memory.shouldComment() ? "cooldown" : `no posts >20 (got ${scoredFeed.length} posts, top score: ${(scoredFeed[0]?.score ?? 0).toFixed(1)})`;
+      const reason = !memory.shouldComment() ? "cooldown" : `no posts >8 (got ${scoredFeed.length} posts, top score: ${(scoredFeed[0]?.score ?? 0).toFixed(1)})`;
       console.log(`   [decision] comment skipped: ${reason}`);
     }
 
@@ -110,7 +110,7 @@ export class DecisionEngine {
 
     for (const c of scoredActions) {
       const repeats = typeCounts.get(c.action.type) ?? 0;
-      const penalty = repeats >= 3 ? repeats * 12 : repeats * 5;
+      const penalty = repeats * 3;
       const adjusted = c.score - penalty;
       if (adjusted > bestScore) { bestScore = adjusted; best = { ...c, score: adjusted }; }
     }
