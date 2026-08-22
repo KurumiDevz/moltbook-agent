@@ -84,7 +84,7 @@ export class Observer {
     const { posts, hasMore } = await this.agent.getFeed({ sort, limit });
     const scored: ScoredPost[] = posts.map((post) => {
       const reasons: string[] = [];
-      let score = 0;
+      let score = 5; // base score so every post is at least interactable
       // Value alignment
       const postKeywords = extractKeywords(`${post.title} ${post.content ?? ""}`);
       const valueAlignment = this.personality.getValueAlignment(postKeywords);

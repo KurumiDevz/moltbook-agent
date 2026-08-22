@@ -136,6 +136,9 @@ export class AutonomousAgent {
       trends,
       interesting,
     );
+    if (process.env.DEBUG) {
+      console.log("   Scored actions:", scored.map((s) => `${s.action.type}:${s.score.toFixed(0)}(${s.reason})`).join(", "));
+    }
     const recentInteractions = this.memory.getRecentInteractions(5);
     const recentActions: ScoredAction[] = recentInteractions.map((i) => ({
       action: { type: i.type as ScoredAction["action"]["type"] } as ScoredAction["action"],

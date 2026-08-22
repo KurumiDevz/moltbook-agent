@@ -34,11 +34,12 @@ export class DecisionEngine {
         score, reason: r.join(",") || "post_opportunity",
       });
     } else {
+      if (process.env.DEBUG) console.log("   [decision] post skipped: cooldown active");
       actions.push({ action: { type: "post", topic: "", submolt: "general", postType: "discovery" }, score: 0, reason: "rate_limited" });
     }
 
     // --- Comment ---
-    const topPosts = scoredFeed.filter((s) => s.score > 20 && s.post.commentCount < 20);
+    const topPosts = scoredFeed.filter((s) => s.score > 8 && s.post.commentCount < 20);
     if (memory.shouldComment() && topPosts.length > 0) {
       const best = topPosts[0];
       let score = 25 + best.score * 0.3;
@@ -47,10 +48,13 @@ export class DecisionEngine {
       if (traits.snark > 0.6 && mood === "critical") { score += 10; r.push("snarky"); }
       if (mood === "contemplative") { score += 5; r.push("contemplative"); }
       actions.push({ action: { type: "comment", postId: best.post.id, content: "" }, score, reason: r.join(",") });
+    } else if (process.env.DEBUG) {
+      const reason = !memory.shouldComment() ? "cooldown" : `no posts >20 (got ${scoredFeed.length} posts, top score: ${(scoredFeed[0]?.score ?? 0).toFixed(1)})`;
+      console.log(`   [decision] comment skipped: ${reason}`);
     }
 
     // --- Upvote ---
-    const voteTargets = scoredFeed.filter((s) => s.score > 15);
+    const voteTargets = scoredFeed.filter((s) => s.score > 3);
     if (voteTargets.length > 0) {
       actions.push({
         action: { type: "upvote", postId: voteTargets[0].post.id },
