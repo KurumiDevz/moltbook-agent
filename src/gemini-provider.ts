@@ -172,9 +172,12 @@ export class GeminiProvider implements Provider {
 
     // Create nimji client with refreshed cookies + auth tokens
     // nimji requires AT_TOKEN and F_SID for authenticated requests
+    // Increase stream timeouts for longer responses (default 30s idle cuts off mid-generation)
     this.client = create({
       COOKIES: cookies,
       MODEL: this.defaultModel,
+      STREAM_IDLE_TIMEOUT_MS: "120000",
+      STREAM_MAX_DURATION_MS: "600000",
       ...(refresh ? { AT_TOKEN: refresh.atToken, F_SID: refresh.fSid } : {}),
       ...config.options,
     });
