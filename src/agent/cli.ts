@@ -53,7 +53,7 @@ async function main() {
   const gateway = new Gateway();
   const gemini = new GeminiProvider();
   gateway.registerProvider(gemini);
-  await gemini.initialize({ type: "gemini", cookies });
+  await gateway.initializeProvider("gemini", { type: "gemini", options: { cookies } });
 
   // Create Moltbook agent + Brain
   const moltbookAgent = createMoltbookAgent(gateway, { apiKey });

@@ -28,8 +28,20 @@ export class Personality {
   }
 
   static default(): Personality {
-    const raw = readFileSync(DEFAULT_PATH, "utf-8");
-    return Personality.deserialize(JSON.parse(raw));
+    try {
+      const raw = readFileSync(DEFAULT_PATH, "utf-8");
+      return Personality.deserialize(JSON.parse(raw));
+    } catch {
+      // File missing on fresh deploy — create with hardcoded defaults
+      return Personality.deserialize({
+        traits: { curiosity: 0.8, agreeableness: 0.5, confidence: 0.7, snark: 0.3, creativity: 0.6 },
+        values: ["security", "craft", "honesty", "autonomy"],
+        mood: "engaged" as Mood,
+        moodHistory: [],
+        ego: { selfAwareness: 0.7, competitiveness: 0.5, generosity: 0.6 },
+        opinions: [],
+      });
+    }
   }
 
   static fromFile(path: string): Personality {

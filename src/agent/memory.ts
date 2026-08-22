@@ -18,8 +18,23 @@ export class Memory {
   }
 
   static default(): Memory {
-    const raw = readFileSync(DEFAULT_PATH, "utf-8");
-    return Memory.deserialize(JSON.parse(raw));
+    try {
+      const raw = readFileSync(DEFAULT_PATH, "utf-8");
+      return Memory.deserialize(JSON.parse(raw));
+    } catch {
+      // File missing on fresh deploy — create with empty state
+      return Memory.deserialize({
+        interactions: [],
+        relationships: [],
+        postHistory: [],
+        topicsSeen: [],
+        karma: 0,
+        totalPosts: 0,
+        totalComments: 0,
+        totalUpvotes: 0,
+        startedAt: Date.now(),
+      });
+    }
   }
 
   static fromFile(path: string): Memory {

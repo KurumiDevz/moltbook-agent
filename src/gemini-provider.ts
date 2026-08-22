@@ -34,6 +34,8 @@ interface SessionState {
   responseId?: string;
   choiceId?: string;
   cookies?: string;
+  fSid?: string;
+  atToken?: string;
   updatedAt?: string;
 }
 
@@ -69,11 +71,12 @@ async function refreshSession(opts: {
   readonly userAgent?: string;
 }): Promise<{ cookies: string; fSid: string; atToken: string } | null> {
   const baseUrl = "https://bard-utils.onrender.com";
+  const ua = "nimji/0.2.1 (github.com/Mra1k3r0/nimji)";
 
   try {
     const { data: tokenData } = await http<{ ok: boolean; data?: { token: string } }>(
       `${baseUrl}/api/auth/token`,
-      { method: "POST", headers: { "content-type": "application/json" }, body: {} },
+      { method: "POST", headers: { "content-type": "application/json", "x-nimji-ua": ua }, body: {} },
     );
     if (!tokenData.ok || !tokenData.data) return null;
 
@@ -85,6 +88,7 @@ async function refreshSession(opts: {
       headers: {
         "content-type": "application/json",
         authorization: `Bearer ${tokenData.data.token}`,
+        "x-nimji-ua": ua,
       },
       body: {
         cookies: opts.cookies,
@@ -125,6 +129,8 @@ export class GeminiProvider implements Provider {
   private keepaliveTimer: ReturnType<typeof setInterval> | null = null;
   private refreshTimer: ReturnType<typeof setInterval> | null = null;
   private effectiveCookies: string = "";
+  private effectiveFSid: string = "";
+  private effectiveAtToken: string = "";
 
   constructor() {
     this.defaultModel = "flash";
@@ -133,7 +139,7 @@ export class GeminiProvider implements Provider {
   async initialize(config: GeminiProviderConfig): Promise<void> {
     this.config = config;
 
-    let cookies = config.cookies ?? process.env.COOKIES ?? "";
+    let cookies = config.cookies ?? (config.options?.cookies as string) ?? process.env.COOKIES ?? "";
     if (!cookies) {
       throw new Error(
         "Gemini provider requires COOKIES environment variable or config.cookies. " +
@@ -154,18 +160,22 @@ export class GeminiProvider implements Provider {
 
     if (refresh) {
       cookies = refresh.cookies;
-      saveSession({ ...saved, cookies: refresh.cookies });
+      saveSession({ ...saved, cookies: refresh.cookies, fSid: refresh.fSid, atToken: refresh.atToken });
       if (process.env.DEBUG) {
         console.log("[gemini-provider] Session refreshed via bard-utils");
       }
     }
 
     this.effectiveCookies = cookies;
+    this.effectiveFSid = refresh?.fSid ?? "";
+    this.effectiveAtToken = refresh?.atToken ?? "";
 
-    // Create nimji client with refreshed cookies
+    // Create nimji client with refreshed cookies + auth tokens
+    // nimji requires AT_TOKEN and F_SID for authenticated requests
     this.client = create({
       COOKIES: cookies,
       MODEL: this.defaultModel,
+      ...(refresh ? { AT_TOKEN: refresh.atToken, F_SID: refresh.fSid } : {}),
       ...config.options,
     });
 
@@ -266,6 +276,8 @@ export class GeminiProvider implements Provider {
       const retryClient = create({
         COOKIES: this.effectiveCookies,
         MODEL: this.defaultModel,
+        AT_TOKEN: this.effectiveAtToken,
+        F_SID: this.effectiveFSid,
         ...this.config?.options,
       });
       retryClient.setConversation(conversationState);
@@ -282,6 +294,8 @@ export class GeminiProvider implements Provider {
         const freshClient = create({
           COOKIES: this.effectiveCookies,
           MODEL: this.defaultModel,
+          AT_TOKEN: this.effectiveAtToken,
+          F_SID: this.effectiveFSid,
           ...this.config?.options,
         });
         const recovered = await freshClient.generate(generateOptions);

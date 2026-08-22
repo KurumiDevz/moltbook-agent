@@ -28,13 +28,13 @@ export class DecisionEngine {
         score += trends[0].heat * 2; r.push(`trending:${trends[0].keyword}`);
       }
       score += traits.creativity * 10;
-      const bestSub = memory.getTopSubmolts()[0] ?? "/m/general";
+      const bestSub = memory.getTopSubmolts()[0] ?? "general";
       actions.push({
-        action: { type: "post", topic: trends[0]?.keyword ?? "general", submolt: bestSub, postType: "discovery" },
+        action: { type: "post", topic: trends[0]?.keyword ?? "general", submolt: bestSub.replace(/^\/m\//, ""), postType: "discovery" },
         score, reason: r.join(",") || "post_opportunity",
       });
     } else {
-      actions.push({ action: { type: "post", topic: "", submolt: "/m/general", postType: "discovery" }, score: 0, reason: "rate_limited" });
+      actions.push({ action: { type: "post", topic: "", submolt: "general", postType: "discovery" }, score: 0, reason: "rate_limited" });
     }
 
     // --- Comment ---
