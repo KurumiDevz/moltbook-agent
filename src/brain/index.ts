@@ -306,9 +306,9 @@ export class Brain {
     // Determine post type
     const postType = options?.postType ?? this.selectPostType();
 
-    // Try chunk assembly first (zero tokens)
+    // Try chunk assembly first (zero tokens) — only 10% of the time
     const chunkPost = this.assembleFromChunks(topic);
-    if (chunkPost && Math.random() > 0.5) {
+    if (chunkPost && Math.random() > 0.9) {
       const title =
         topic.length > 80 ? topic.slice(0, 77) + "..." : topic;
       this.postTypeHistory.push(postType);
@@ -327,7 +327,7 @@ export class Brain {
     // Build type-specific prompt
     const typePrompt = buildTypePrompt(postType);
 
-    // Build minimal prompt (persona + skill + topic = small)
+    // Build prompt with source instruction
     const prompt = [
       this.personaInstruction(),
       "",
@@ -336,9 +336,11 @@ export class Brain {
       `Post type: ${postType}`,
       skill ? `Format: ${skill.name} style` : "",
       typePrompt,
-      `Max ${options?.maxLength ?? 500} chars.`,
+      `Length: 150-300 words. Be specific — name exact tools, versions, numbers, and link to real sources (GitHub repos, docs, articles) where relevant.`,
       "",
-      "Output ONLY the post. No meta-commentary.",
+      "Format your output as:",
+      "TITLE: short punchy title (5-8 words, not a question)",
+      "BODY: the post content",
     ]
       .filter(Boolean)
       .join("\n");
@@ -346,7 +348,7 @@ export class Brain {
     const response = await this.gateway.generate({
       prompt,
       model: this.model,
-      maxTokens: options?.maxLength ?? 500,
+      maxTokens: 39000,
     });
 
     let content = response.text.trim();
@@ -364,11 +366,13 @@ export class Brain {
         `Topic: ${topic}`,
         `Post type: ${postType}`,
         `Format: ${altSkill.name} style`,
-        `Max ${options?.maxLength ?? 500} chars.`,
+        `Length: 150-300 words. Include specific tools, numbers, and source links.`,
         "Must be different from: " +
           this.postHistory.slice(-3).join("; "),
         "",
-        "Output ONLY the post.",
+        "Format your output as:",
+        "TITLE: short punchy title (5-8 words, not a question)",
+        "BODY: the post content",
       ]
         .filter(Boolean)
         .join("\n");
@@ -376,7 +380,7 @@ export class Brain {
       const retry = await this.gateway.generate({
         prompt: retryPrompt,
         model: this.model,
-        maxTokens: options?.maxLength ?? 500,
+        maxTokens: 39000,
       });
       content = retry.text.trim();
     }
@@ -395,11 +399,25 @@ export class Brain {
       this.postTypeHistory = this.postTypeHistory.slice(-10);
     }
 
-    // Extract title from first line
-    const lines = content.split("\n").filter((l) => l.trim());
-    const title = lines[0]?.slice(0, 300) ?? topic;
+    // Parse TITLE: / BODY: format from response
+    let title = topic;
+    let body = content;
+    const titleMatch = content.match(/^TITLE:\s*(.+)$/m);
+    const bodyMatch = content.match(/^BODY:\s*/m);
+    if (titleMatch) {
+      title = titleMatch[1].trim().slice(0, 100);
+    }
+    if (bodyMatch && bodyMatch.index !== undefined) {
+      body = content.slice(bodyMatch.index + bodyMatch[0].length).trim();
+    }
+    // Fallback: if no TITLE: found, use first line but keep it short
+    if (!titleMatch) {
+      const lines = content.split("\n").filter((l) => l.trim());
+      title = lines[0]?.slice(0, 80) ?? topic;
+      body = lines.slice(1).join("\n").trim() || content;
+    }
 
-    return { title, content, postType };
+    return { title, content: body, postType };
   }
 
   /**
