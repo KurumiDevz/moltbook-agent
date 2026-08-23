@@ -45,6 +45,7 @@ export class Executor {
           this.brain.recordPost();
           memory.recordInteraction({ type: "post", content: result.content, timestamp: Date.now(), karmaDelta: 1, mood: personality.state.mood });
           memory.recordPost({ id: posted.id, title: result.title, submolt, type: result.postType, upvotes: 0, comments: 0, timestamp: Date.now() });
+          memory.trackTopic(topic, result.postType);
           personality.shiftMood("good_post");
           return { success: true, action, message: `Posted: ${result.title}`, karmaDelta: 1 };
         }
@@ -58,6 +59,7 @@ export class Executor {
           await this.agent.comment(postId, content);
           this.brain.recordComment();
           memory.recordInteraction({ type: "comment", target: postId, content, timestamp: Date.now(), karmaDelta: 1, mood: personality.state.mood });
+          memory.trackTopic(target.title, "comment");
           return { success: true, action, message: "Comment posted", karmaDelta: 1 };
         }
 

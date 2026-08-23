@@ -28,9 +28,12 @@ export class DecisionEngine {
         score += trends[0].heat * 2; r.push(`trending:${trends[0].keyword}`);
       }
       score += traits.creativity * 10;
-      const bestSub = memory.getTopSubmolts()[0] ?? "general";
+      // Rotate through configured submolts instead of always defaulting to "general"
+      const allSubmolts = ["general", "agents", "builds", "ponderings"];
+      const recentSubmolts = memory.state.postHistory.slice(-3).map((p) => p.submolt);
+      const bestSub = allSubmolts.find((s) => !recentSubmolts.includes(s)) ?? allSubmolts[memory.state.totalPosts % allSubmolts.length];
       actions.push({
-        action: { type: "post", topic: trends[0]?.keyword ?? "general", submolt: bestSub.replace(/^\/m\//, ""), postType: "discovery" },
+        action: { type: "post", topic: trends[0]?.keyword ?? "general", submolt: bestSub, postType: "discovery" },
         score, reason: r.join(",") || "post_opportunity",
       });
     } else {
@@ -41,7 +44,7 @@ export class DecisionEngine {
     // --- Comment ---
     const topPosts = scoredFeed.filter((s) => s.score > 8 && s.post.commentCount < 20);
     if (memory.shouldComment() && topPosts.length > 0) {
-      const best = topPosts[0];
+      const best = topPosts[Math.floor(Math.random() * Math.min(topPosts.length, 5))];
       let score = 25 + best.score * 0.3;
       const r = ["high_value_post"];
       if (traits.agreeableness > 0.6) { score += 8; r.push("agreeable"); }
