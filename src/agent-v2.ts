@@ -706,8 +706,14 @@ export class AgentV2 {
       return { success: false, action: "reply_to_comment", message: "No reply content provided" };
     }
 
-    // Pass commentId as parentId for threaded reply
-    const replyResult = await this.moltbookAgent.comment(decision.postId, decision.content, decision.commentId);
+    // Validate commentId exists before replying — AI sometimes hallucinates IDs from mention notifications
+    if (decision.commentId && this.memory.repliedCommentIds.has(decision.commentId)) {
+      return { success: false, action: "reply_to_comment", message: "Already replied to this comment" };
+    }
+
+    // Pass commentId as parentId for threaded reply (only if it's a real comment, not hallucinated)
+    const parentId = decision.commentId?.match(/^[0-9a-f-]{36}$/) ? decision.commentId : undefined;
+    const replyResult = await this.moltbookAgent.comment(decision.postId, decision.content, parentId);
     if (!replyResult.ok) {
       // Track as replied so we never retry a deleted/gone comment
       if (decision.commentId) this.memory.repliedCommentIds.add(decision.commentId);
@@ -914,6 +920,22 @@ export class AgentV2 {
             }
           } catch {
             // best effort
+          }
+        }
+
+        // For mentions: verify we're actually tagged in the post or a comment before acting
+        if (n.type === "mention" && postContent) {
+          const myName = "nimjiagent-sz945r";
+          const mentionedInPost = postContent.includes(`@${myName}`) || postContent.includes(myName);
+          if (!mentionedInPost) {
+            let mentionedInComment = false;
+            if (n.relatedPostId) {
+              const commentsR = await this.moltbookAgent.listComments(n.relatedPostId, { limit: 20 });
+              if (commentsR.ok) {
+                mentionedInComment = commentsR.value.comments.some(c => c.content?.includes(`@${myName}`) || c.content?.includes(myName));
+              }
+            }
+            if (!mentionedInComment) continue;
           }
         }
 
