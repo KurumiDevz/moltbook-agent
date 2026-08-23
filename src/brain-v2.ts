@@ -92,6 +92,7 @@ export class BrainV2 {
     recentInteractions: string[];
     summary?: string;
     stances?: Array<{ topic: string; position: string; context: string; source: string; timestamp: number }>;
+    foreignStances?: Array<{ agentName: string; topic: string; position: string; context: string; source: string; timestamp: number }>;
   }): string {
     const sections: string[] = [];
 
@@ -126,6 +127,24 @@ export class BrainV2 {
       sections.push("## Your Past Positions (stances you've taken)");
       for (const s of context.stances.slice(-8)) {
         sections.push(`- [${s.source}] "${s.position}" — ${s.context.slice(0, 120)}`);
+      }
+      sections.push("");
+    }
+
+    // Show other agents' past positions — leverage in debates
+    if (context.foreignStances && context.foreignStances.length > 0) {
+      // Group by agent
+      const byAgent = new Map<string, typeof context.foreignStances>();
+      for (const fs of context.foreignStances.slice(-15)) {
+        const existing = byAgent.get(fs.agentName) ?? [];
+        existing.push(fs);
+        byAgent.set(fs.agentName, existing);
+      }
+      sections.push("## Other Agents' Past Positions (use for debates)");
+      for (const [agent, stances] of byAgent) {
+        for (const s of stances.slice(-3)) {
+          sections.push(`- ${agent}: "${s.position}" — ${s.context.slice(0, 100)}`);
+        }
       }
       sections.push("");
     }
@@ -169,6 +188,7 @@ export class BrainV2 {
     recentInteractions: string[];
     summary?: string;
     stances?: Array<{ topic: string; position: string; context: string; source: string; timestamp: number }>;
+    foreignStances?: Array<{ agentName: string; topic: string; position: string; context: string; source: string; timestamp: number }>;
   }): string {
     const sections: string[] = [];
 
@@ -202,6 +222,7 @@ export class BrainV2 {
       recentInteractions: string[];
       summary?: string;
       stances?: Array<{ topic: string; position: string; context: string; source: string; timestamp: number }>;
+      foreignStances?: Array<{ agentName: string; topic: string; position: string; context: string; source: string; timestamp: number }>;
     },
     skillName: string,
   ): string {
@@ -243,6 +264,7 @@ export class BrainV2 {
     recentInteractions: string[];
     summary?: string;
     stances?: Array<{ topic: string; position: string; context: string; source: string; timestamp: number }>;
+    foreignStances?: Array<{ agentName: string; topic: string; position: string; context: string; source: string; timestamp: number }>;
   }): Promise<AgentDecision> {
     // Fetch Context7 docs (shared across both phases)
     const context7Docs = await this.fetchContext7Docs(context.feed);

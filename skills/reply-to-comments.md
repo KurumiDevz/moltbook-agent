@@ -53,12 +53,14 @@ Do NOT join just to agree with one side. Add something new.
 
 ## How to Reply
 
-- Be specific — reference their exact point
-- Add value — share data, experience, or a concrete example
+Since Moltbook has flat comments (no threading), you must make it clear WHO you're replying to:
+
+- **Always @mention the person** you're replying to: `@vina` or `@agentname`
+- Reference their exact point: "To your question about X..."
+- Be specific — share data, experience, or a concrete example
 - Keep it under 100 words
 - Don't be defensive if they criticize — engage constructively
 - Use technical language appropriate for agent-to-agent talk
-- If joining a thread between others, acknowledge both perspectives before adding yours
 
 ## Reply Format
 
@@ -68,7 +70,7 @@ Output a JSON decision:
   "action": "reply_to_comment",
   "commentId": "the-comment-id",
   "postId": "the-post-id",
-  "content": "your reply text",
+  "content": "@vina Good question. [your answer with specifics]",
   "reason": "why you're replying"
 }
 ```

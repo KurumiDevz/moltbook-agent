@@ -23,6 +23,7 @@ import type {
   ExecutionResult,
   PostSummary,
   Stance,
+  ForeignStance,
   ScoredPost,
   ActivitySummary,
   TaskQueueItem,
@@ -67,6 +68,8 @@ type MemoryState = {
   repliedPostCounts: Map<string, number>;
   /** Stances the agent has taken — positions it can reference in debates */
   stances: Stance[];
+  /** Stances other agents have taken — positions nimjiagent can reference in debates */
+  foreignStances: ForeignStance[];
 };
 
 // ── AgentV2 ──────────────────────────────────────────────────────────
@@ -117,6 +120,7 @@ export class AgentV2 {
       repliedCommentIds: new Set(existingSummary?.repliedCommentIds ?? []),
       repliedPostCounts: new Map<string, number>(),
       stances: existingSummary?.stances ?? [],
+      foreignStances: existingSummary?.foreignStances ?? [],
     };
 
     // Resume cycle count from last summary
@@ -236,6 +240,21 @@ export class AgentV2 {
     console.log(`   Feed: ${feed.length} posts | Notifications: ${notifications.length}`);
     console.log(`   Rate limits: post=${rateLimits.canPost} comment=${rateLimits.canComment}`);
 
+    // Record foreign stances from feed posts
+    for (const post of feed) {
+      if (post.author !== "nimjiagent-sz945r" && post.title) {
+        this.recordForeignStance(
+          post.author,
+          "",  // agentId not available in FeedPost
+          post.submolt,
+          post.title,
+          post.content ?? post.title,
+          "post",
+          post.id,
+        );
+      }
+    }
+
     // 3. Generate activity summary periodically (with task queue)
     let summaryText: string | undefined;
     if (this.cycleCount % this.summaryInterval === 0 || !this.lastSummary) {
@@ -248,6 +267,7 @@ export class AgentV2 {
           this.memory.taskQueue,
           this.cycleCount,
           this.memory.stances,
+          this.memory.foreignStances,
         );
         // Merge in-memory replied comment IDs into summary so they persist across restarts
         this.lastSummary.repliedCommentIds = [
@@ -275,6 +295,7 @@ export class AgentV2 {
       recentInteractions: [],
       summary: summaryText,
       stances: this.memory.stances,
+      foreignStances: this.memory.foreignStances,
     });
 
     console.log(`   Decision: ${decision.action} — ${decision.reason}`);
@@ -312,6 +333,7 @@ export class AgentV2 {
         this.memory.taskQueue,
         this.cycleCount,
         this.memory.stances,
+        this.memory.foreignStances,
       );
       this.summaryGen.save(preExecSummary);
       this.lastSummary = preExecSummary;
@@ -341,6 +363,7 @@ export class AgentV2 {
         this.memory.taskQueue,
         this.cycleCount,
         this.memory.stances,
+        this.memory.foreignStances,
       );
       this.summaryGen.save(cycleSummary);
       this.lastSummary = cycleSummary;
@@ -374,7 +397,7 @@ export class AgentV2 {
     console.log(`   Feed: ${feed.length} posts (${relevantPosts.length} from semantic search)`);
 
     // Try to load existing summary
-    const summaryText = this.summaryGen.formatForPrompt(this.summaryGen.generate(this.memory.postHistory, [], 0, [], 0, this.memory.stances));
+    const summaryText = this.summaryGen.formatForPrompt(this.summaryGen.generate(this.memory.postHistory, [], 0, [], 0, this.memory.stances, this.memory.foreignStances));
 
     const decision = await this.brain.decide({
       feed,
@@ -384,6 +407,7 @@ export class AgentV2 {
       recentInteractions: [],
       summary: summaryText,
       stances: this.memory.stances,
+      foreignStances: this.memory.foreignStances,
     });
 
     console.log(`\n📋 Would execute: ${decision.action}`);
@@ -718,6 +742,19 @@ export class AgentV2 {
           postContent,
           createdAt: n.createdAt,
         });
+
+        // Record foreign stances from comments on our posts
+        if (n.comment?.author?.name && n.comment.author.name !== "nimjiagent-sz945r" && n.comment.content) {
+          this.recordForeignStance(
+            n.comment.author.name,
+            "",
+            postTitle ?? n.relatedPostId ?? "unknown",
+            n.comment.content.slice(0, 100),
+            n.comment.content,
+            "comment",
+            n.relatedCommentId ?? `${n.relatedPostId}-${n.comment.author.name}-${Date.now()}`,
+          );
+        }
       }
       return results;
     } catch {
@@ -777,6 +814,30 @@ export class AgentV2 {
   }
 
   // ── Helpers ─────────────────────────────────────────────────────────
+
+  private recordForeignStance(agentName: string, agentId: string, topic: string, position: string, context: string, source: "post" | "comment", sourceId: string) {
+    // Don't record own stances
+    if (agentName === "nimjiagent-sz945r") return;
+
+    // Don't duplicate — check if we already have this sourceId
+    if (this.memory.foreignStances.some(s => s.sourceId === sourceId)) return;
+
+    this.memory.foreignStances.push({
+      agentName,
+      agentId,
+      topic,
+      position,
+      context: context.slice(0, 300),
+      source,
+      sourceId,
+      timestamp: Date.now(),
+    });
+
+    // Keep only last 30 foreign stances
+    if (this.memory.foreignStances.length > 30) {
+      this.memory.foreignStances = this.memory.foreignStances.slice(-30);
+    }
+  }
 
   private parseTitleBody(text: string): { title: string; body: string } {
     const titleMatch = text.match(/TITLE:\s*(.+)/i);

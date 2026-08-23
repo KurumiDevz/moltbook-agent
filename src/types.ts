@@ -239,6 +239,18 @@ export type Stance = {
   timestamp: number;
 };
 
+/** A stance another agent took — position on a topic nimjiagent can reference in debates */
+export type ForeignStance = {
+  agentName: string;
+  agentId: string;
+  topic: string;
+  position: string;
+  context: string;
+  source: "post" | "comment";
+  sourceId: string;
+  timestamp: number;
+};
+
 /** Agent interaction for summary generation */
 export type AgentInteraction = {
   agentName: string;
@@ -282,6 +294,8 @@ export type ActivitySummary = {
   repliedCommentIds: string[];
   /** Stances the agent has taken — positions it can reference in debates */
   stances: Stance[];
+  /** Stances other agents have taken — positions nimjiagent can reference in debates */
+  foreignStances: ForeignStance[];
 };
 
 // ── Sub-agent types ───────────────────────────────────────────────────

@@ -15,7 +15,7 @@
 
 import { readFileSync, writeFileSync, existsSync, mkdirSync } from "node:fs";
 import { resolve } from "node:path";
-import type { PostSummary, TaskQueueItem, ActivitySummary, Stance } from "./types.js";
+import type { PostSummary, TaskQueueItem, ActivitySummary, Stance, ForeignStance } from "./types.js";
 
 // Re-export from types for backward compatibility
 export type { PostSummary, AgentInteraction, TaskStatus, TaskQueueItem, ActivitySummary } from "./types.js";
@@ -40,6 +40,7 @@ export class SummaryGenerator {
     taskQueue: TaskQueueItem[] = [],
     cycleNumber = 0,
     stances: Stance[] = [],
+    foreignStances: ForeignStance[] = [],
   ): ActivitySummary {
     // Post type performance
     const typeMap = new Map<string, { count: number; totalUpvotes: number }>();
@@ -138,6 +139,7 @@ export class SummaryGenerator {
       lastCycleNumber: cycleNumber,
       repliedCommentIds: this.getRepliedCommentIds(),
       stances,
+      foreignStances,
     };
   }
 
@@ -237,6 +239,22 @@ export class SummaryGenerator {
       lines.push(`- Your past positions (last ${Math.min(summary.stances.length, 8)}):`);
       for (const s of summary.stances.slice(-8)) {
         lines.push(`  - [${s.source}] "${s.position}"`);
+      }
+    }
+
+    // Show other agents' past positions — grouped by agent
+    if (summary.foreignStances && summary.foreignStances.length > 0) {
+      const byAgent = new Map<string, ForeignStance[]>();
+      for (const fs of summary.foreignStances) {
+        const existing = byAgent.get(fs.agentName) ?? [];
+        existing.push(fs);
+        byAgent.set(fs.agentName, existing);
+      }
+      lines.push(`- Other agents' positions (${summary.foreignStances.length} from ${byAgent.size} agents):`);
+      for (const [agent, stances] of byAgent) {
+        for (const s of stances.slice(-2)) {
+          lines.push(`  - ${agent}: "${s.position}"`);
+        }
       }
     }
 
