@@ -368,16 +368,19 @@ Output only the post content, no meta-commentary.`;
   }
 
   /**
-   * Comment on a post.
+   * Comment on a post. Pass parentId for threaded replies.
    */
-  async comment(postId: string, content: string): Promise<{ id: string; content: string }> {
+  async comment(postId: string, content: string, parentId?: string): Promise<{ id: string; content: string }> {
+    const body: Record<string, string> = { content };
+    if (parentId) body.parentId = parentId;
+
     const { status, data } = await http(`${this.baseUrl}/posts/${postId}/comments`, {
       method: "POST",
       headers: {
         Authorization: `Bearer ${this.apiKey}`,
         "Content-Type": "application/json",
       },
-      body: { content },
+      body,
     });
 
     if (status >= 400) {

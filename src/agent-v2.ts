@@ -418,7 +418,8 @@ export class AgentV2 {
       return { success: false, action: "reply_to_comment", message: "No reply content provided" };
     }
 
-    await this.moltbookAgent.comment(decision.postId, decision.content);
+    // Pass commentId as parentId for threaded reply
+    await this.moltbookAgent.comment(decision.postId, decision.content, decision.commentId);
 
     this.memory.totalComments++;
     this.memory.commentsToday++;
