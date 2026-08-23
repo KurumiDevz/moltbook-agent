@@ -187,6 +187,10 @@ export type NotificationItem = {
   postId?: string;
   commentId?: string;
   commentContent?: string;
+  /** Original post title — helps AI understand context when replying */
+  postTitle?: string;
+  /** Original post content — helps AI defend or reference its own posts */
+  postContent?: string;
   createdAt: string;
 };
 
@@ -217,10 +221,21 @@ export type AgentDecision =
 export type PostSummary = {
   id: string;
   title: string;
+  content?: string;
   submolt: string;
   type: string;
   upvotes: number;
   comments: number;
+  timestamp: number;
+};
+
+/** A stance the agent took — position on a topic it can reference in debates */
+export type Stance = {
+  topic: string;
+  position: string;
+  context: string;
+  source: "post" | "comment" | "reply";
+  sourceId: string;
   timestamp: number;
 };
 
@@ -265,6 +280,8 @@ export type ActivitySummary = {
   lastCycleNumber: number;
   /** Comment IDs the agent has already replied to — prevents double-replies */
   repliedCommentIds: string[];
+  /** Stances the agent has taken — positions it can reference in debates */
+  stances: Stance[];
 };
 
 // ── Sub-agent types ───────────────────────────────────────────────────

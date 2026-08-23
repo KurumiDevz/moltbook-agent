@@ -22,9 +22,10 @@ import type {
   RateLimitState,
   ExecutionResult,
   PostSummary,
-  TaskQueueItem,
-  ActivitySummary,
+  Stance,
   ScoredPost,
+  ActivitySummary,
+  TaskQueueItem,
 } from "./types.js";
 
 // Re-export for backward compatibility
@@ -62,8 +63,10 @@ type MemoryState = {
   taskQueue: TaskQueueItem[];
   /** Comment IDs we've already replied to — prevents double-replies */
   repliedCommentIds: Set<string>;
-  /** Per-post reply count — enforces max 3 replies per post per day */
+  /** Per-post reply count — enforces stochastic cap */
   repliedPostCounts: Map<string, number>;
+  /** Stances the agent has taken — positions it can reference in debates */
+  stances: Stance[];
 };
 
 // ── AgentV2 ──────────────────────────────────────────────────────────
@@ -113,6 +116,7 @@ export class AgentV2 {
         : [],
       repliedCommentIds: new Set(existingSummary?.repliedCommentIds ?? []),
       repliedPostCounts: new Map<string, number>(),
+      stances: existingSummary?.stances ?? [],
     };
 
     // Resume cycle count from last summary
@@ -243,6 +247,7 @@ export class AgentV2 {
           0, // karma (could fetch from API)
           this.memory.taskQueue,
           this.cycleCount,
+          this.memory.stances,
         );
         // Merge in-memory replied comment IDs into summary so they persist across restarts
         this.lastSummary.repliedCommentIds = [
@@ -269,6 +274,7 @@ export class AgentV2 {
       postHistory: this.memory.postHistory,
       recentInteractions: [],
       summary: summaryText,
+      stances: this.memory.stances,
     });
 
     console.log(`   Decision: ${decision.action} — ${decision.reason}`);
@@ -305,6 +311,7 @@ export class AgentV2 {
         0,
         this.memory.taskQueue,
         this.cycleCount,
+        this.memory.stances,
       );
       this.summaryGen.save(preExecSummary);
       this.lastSummary = preExecSummary;
@@ -333,6 +340,7 @@ export class AgentV2 {
         0,
         this.memory.taskQueue,
         this.cycleCount,
+        this.memory.stances,
       );
       this.summaryGen.save(cycleSummary);
       this.lastSummary = cycleSummary;
@@ -366,7 +374,7 @@ export class AgentV2 {
     console.log(`   Feed: ${feed.length} posts (${relevantPosts.length} from semantic search)`);
 
     // Try to load existing summary
-    const summaryText = this.summaryGen.formatForPrompt(this.summaryGen.generate(this.memory.postHistory, [], 0));
+    const summaryText = this.summaryGen.formatForPrompt(this.summaryGen.generate(this.memory.postHistory, [], 0, [], 0, this.memory.stances));
 
     const decision = await this.brain.decide({
       feed,
@@ -375,6 +383,7 @@ export class AgentV2 {
       postHistory: this.memory.postHistory,
       recentInteractions: [],
       summary: summaryText,
+      stances: this.memory.stances,
     });
 
     console.log(`\n📋 Would execute: ${decision.action}`);
@@ -448,6 +457,7 @@ export class AgentV2 {
     this.memory.postHistory.push({
       id: posted.id,
       title,
+      content: content?.slice(0, 500),
       submolt: decision.submolt,
       type: decision.postType,
       upvotes: 0,
@@ -457,6 +467,20 @@ export class AgentV2 {
     this.memory.topicsSeen.push({ topic: decision.topic, timestamp: Date.now() });
     this.memory.totalPosts++;
     this.memory.lastPostAt = Date.now();
+
+    // Record stance — what position did this post take?
+    this.memory.stances.push({
+      topic: decision.topic,
+      position: title,
+      context: (content ?? "").slice(0, 300),
+      source: "post",
+      sourceId: posted.id,
+      timestamp: Date.now(),
+    });
+    // Keep only last 20 stances
+    if (this.memory.stances.length > 20) {
+      this.memory.stances = this.memory.stances.slice(-20);
+    }
 
     return { success: true, action: "post", message: `Posted: ${title}`, karmaDelta: 1 };
   }
@@ -475,6 +499,19 @@ export class AgentV2 {
     this.memory.totalComments++;
     this.memory.commentsToday++;
     this.memory.lastCommentAt = Date.now();
+
+    // Record stance — what position did this comment take?
+    this.memory.stances.push({
+      topic: `comment on ${decision.postId}`,
+      position: decision.content.slice(0, 100),
+      context: decision.content.slice(0, 300),
+      source: "comment",
+      sourceId: decision.postId,
+      timestamp: Date.now(),
+    });
+    if (this.memory.stances.length > 20) {
+      this.memory.stances = this.memory.stances.slice(-20);
+    }
 
     // Mark notifications as read for the post we commented on (best effort)
     try {
@@ -503,6 +540,19 @@ export class AgentV2 {
     this.memory.totalComments++;
     this.memory.commentsToday++;
     this.memory.lastCommentAt = Date.now();
+
+    // Record stance — what position did this reply take?
+    this.memory.stances.push({
+      topic: `reply to ${decision.commentId}`,
+      position: decision.content.slice(0, 100),
+      context: decision.content.slice(0, 300),
+      source: "reply",
+      sourceId: decision.commentId,
+      timestamp: Date.now(),
+    });
+    if (this.memory.stances.length > 20) {
+      this.memory.stances = this.memory.stances.slice(-20);
+    }
 
     // Track this comment ID so we never reply to it again
     this.memory.repliedCommentIds.add(decision.commentId);
@@ -632,23 +682,44 @@ export class AgentV2 {
   private async fetchNotifications(): Promise<NotificationItem[]> {
     try {
       const { notifications } = (await this.moltbookAgent.getNotifications({ limit: 15 })).unwrap();
-      return notifications
-        .filter((n) => {
-          // Never show notifications for our own comments (prevents self-reply loop)
-          if (n.comment?.author?.name === "nimjiagent-sz945r") {
-            return false;
+      const filtered = notifications.filter((n) => {
+        // Never show notifications for our own comments (prevents self-reply loop)
+        if (n.comment?.author?.name === "nimjiagent-sz945r") {
+          return false;
+        }
+        return true;
+      });
+
+      // Fetch post content for comment notifications so AI can defend its posts
+      const results: NotificationItem[] = [];
+      for (const n of filtered) {
+        let postTitle: string | undefined;
+        let postContent: string | undefined;
+        if (n.relatedPostId && (n.type === "comment" || n.type === "comment_reply" || n.type === "mention")) {
+          try {
+            const postResult = await this.moltbookAgent.getPost(n.relatedPostId);
+            if (postResult.isOk()) {
+              const { post } = postResult.value;
+              postTitle = post.title;
+              postContent = post.content?.slice(0, 500);
+            }
+          } catch {
+            // best effort — post may have been deleted
           }
-          return true;
-        })
-        .map((n) => ({
+        }
+        results.push({
           type: n.type,
           message: n.content,
           agentName: n.comment?.author?.name,
           postId: n.relatedPostId,
           commentId: n.relatedCommentId,
           commentContent: n.comment?.content,
+          postTitle,
+          postContent,
           createdAt: n.createdAt,
-        }));
+        });
+      }
+      return results;
     } catch {
       return [];
     }

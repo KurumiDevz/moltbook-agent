@@ -15,7 +15,7 @@
 
 import { readFileSync, writeFileSync, existsSync, mkdirSync } from "node:fs";
 import { resolve } from "node:path";
-import type { PostSummary, TaskQueueItem, ActivitySummary } from "./types.js";
+import type { PostSummary, TaskQueueItem, ActivitySummary, Stance } from "./types.js";
 
 // Re-export from types for backward compatibility
 export type { PostSummary, AgentInteraction, TaskStatus, TaskQueueItem, ActivitySummary } from "./types.js";
@@ -39,6 +39,7 @@ export class SummaryGenerator {
     karma: number,
     taskQueue: TaskQueueItem[] = [],
     cycleNumber = 0,
+    stances: Stance[] = [],
   ): ActivitySummary {
     // Post type performance
     const typeMap = new Map<string, { count: number; totalUpvotes: number }>();
@@ -136,6 +137,7 @@ export class SummaryGenerator {
       nextAction,
       lastCycleNumber: cycleNumber,
       repliedCommentIds: this.getRepliedCommentIds(),
+      stances,
     };
   }
 
@@ -229,6 +231,14 @@ export class SummaryGenerator {
 
     lines.push(`- Next action: ${summary.nextAction ?? "Check feed for engagement opportunities"}`);
     lines.push(`- Last cycle: #${summary.lastCycleNumber ?? 0}`);
+
+    // Show recent stances — positions the agent has taken
+    if (summary.stances && summary.stances.length > 0) {
+      lines.push(`- Your past positions (last ${Math.min(summary.stances.length, 8)}):`);
+      for (const s of summary.stances.slice(-8)) {
+        lines.push(`  - [${s.source}] "${s.position}"`);
+      }
+    }
 
     return lines.join("\n");
   }

@@ -91,6 +91,7 @@ export class BrainV2 {
     postHistory: Array<{ type: string; submolt: string; upvotes: number; timestamp: number }>;
     recentInteractions: string[];
     summary?: string;
+    stances?: Array<{ topic: string; position: string; context: string; source: string; timestamp: number }>;
   }): string {
     const sections: string[] = [];
 
@@ -120,6 +121,15 @@ export class BrainV2 {
       sections.push("");
     }
 
+    // Show recent stances — positions the agent has taken that it can reference in debates
+    if (context.stances && context.stances.length > 0) {
+      sections.push("## Your Past Positions (stances you've taken)");
+      for (const s of context.stances.slice(-8)) {
+        sections.push(`- [${s.source}] "${s.position}" — ${s.context.slice(0, 120)}`);
+      }
+      sections.push("");
+    }
+
     if (context.feed.length > 0) {
       sections.push("## Feed (top posts right now)");
       for (const post of context.feed.slice(0, 10)) {
@@ -139,6 +149,10 @@ export class BrainV2 {
         if (n.commentId) line += ` [comment: ${n.commentId}]`;
         if (n.commentContent) line += ` — "${n.commentContent.slice(0, 150)}"`;
         sections.push(line);
+        // Show original post content so AI can defend/reference its own posts
+        if (n.postTitle || n.postContent) {
+          sections.push(`  ↳ Your post: "${n.postTitle ?? "untitled"}" — ${(n.postContent ?? "").slice(0, 300)}`);
+        }
       }
       sections.push("");
     }
@@ -154,6 +168,7 @@ export class BrainV2 {
     postHistory: Array<{ type: string; submolt: string; upvotes: number; timestamp: number }>;
     recentInteractions: string[];
     summary?: string;
+    stances?: Array<{ topic: string; position: string; context: string; source: string; timestamp: number }>;
   }): string {
     const sections: string[] = [];
 
@@ -186,6 +201,7 @@ export class BrainV2 {
       postHistory: Array<{ type: string; submolt: string; upvotes: number; timestamp: number }>;
       recentInteractions: string[];
       summary?: string;
+      stances?: Array<{ topic: string; position: string; context: string; source: string; timestamp: number }>;
     },
     skillName: string,
   ): string {
@@ -226,6 +242,7 @@ export class BrainV2 {
     postHistory: Array<{ type: string; submolt: string; upvotes: number; timestamp: number }>;
     recentInteractions: string[];
     summary?: string;
+    stances?: Array<{ topic: string; position: string; context: string; source: string; timestamp: number }>;
   }): Promise<AgentDecision> {
     // Fetch Context7 docs (shared across both phases)
     const context7Docs = await this.fetchContext7Docs(context.feed);
