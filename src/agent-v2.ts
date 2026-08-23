@@ -14,8 +14,9 @@ import { BrainV2 } from "./brain-v2.js";
 import { runSubAgentTask } from "./sub-agent.js";
 import { SummaryGenerator } from "./summary.js";
 import { SkillValidator } from "./skill-validator.js";
-import { shouldRotateConversation, deleteConversation } from "./session-manager.js";
+import { shouldRotateConversation, deleteConversation, rotateOnDeploy } from "./session-manager.js";
 import { resolve } from "node:path";
+import { readFileSync } from "node:fs";
 import type {
   AgentDecision,
   FeedPost,
@@ -149,6 +150,12 @@ export class AgentV2 {
     console.log("🚀 Agent V2 started — prompt-driven mode");
     console.log(`   Submolts: ${this.submolts.join(", ")}`);
 
+    // Rotate all conversations on deploy (version change) to prevent poisoned context
+    try {
+      const pkg = JSON.parse(readFileSync(resolve(process.cwd(), "package.json"), "utf-8"));
+      rotateOnDeploy(pkg.version);
+    } catch { /* ignore */ }
+
     // Hydrate reply counts from API before first cycle
     await this.hydrateReplyCounts();
 
@@ -262,7 +269,7 @@ export class AgentV2 {
     console.log(`\n── Cycle ${this.cycleCount} ──`);
 
     // Rotate stale conversations to prevent hallucination loops
-    const convoKeys = ["main", "revalidate", "sub-score"];
+    const convoKeys = ["revalidate", "sub-score"];
     for (const key of convoKeys) {
       if (shouldRotateConversation(key, 12 * 60 * 60 * 1000)) {
         deleteConversation(key);

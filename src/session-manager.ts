@@ -133,6 +133,43 @@ export function shouldRotateConversation(key: string, maxAgeMs: number = 12 * 60
   }
 }
 
+// ─── Deploy detection ───
+
+const VERSION_FILE = resolve(DATA_DIR, ".agent-version");
+
+/**
+ * Check if the agent was redeployed (package version changed).
+ * If so, rotate ALL conversations to prevent poisoned context.
+ * Returns true if a rotation was performed.
+ */
+export function rotateOnDeploy(currentVersion: string): boolean {
+  try {
+    let lastVersion = "";
+    if (existsSync(VERSION_FILE)) {
+      lastVersion = readFileSync(VERSION_FILE, "utf-8").trim();
+    }
+
+    if (lastVersion && lastVersion !== currentVersion) {
+      // Version changed — delete all conversation files
+      ensureSessionsDir();
+      const files = readdirSync(SESSIONS_DIR).filter(f => f.endsWith(".json"));
+      for (const f of files) {
+        try {
+          unlinkSync(resolve(SESSIONS_DIR, f));
+        } catch { /* skip */ }
+      }
+      console.log(`[session] Deploy detected: ${lastVersion} → ${currentVersion}. Rotated ${files.length} conversations.`);
+    }
+
+    // Save current version
+    mkdirSync(DATA_DIR, { recursive: true });
+    writeFileSync(VERSION_FILE, currentVersion);
+    return lastVersion !== "" && lastVersion !== currentVersion;
+  } catch {
+    return false;
+  }
+}
+
 /**
  * Remove conversation files older than maxAgeMs.
  * Useful for cleaning up stale sub-agent sessions.

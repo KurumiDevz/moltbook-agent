@@ -291,7 +291,6 @@ export class BrainV2 {
       prompt: skillSelectionPrompt,
       model: this.model,
       maxTokens: 200,
-      conversationKey: "main",
     });
 
     const selectedSkill = this.parseSkillSelection(phase1.text);
