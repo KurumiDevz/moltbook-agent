@@ -853,18 +853,46 @@ export class AgentV2 {
 
   private async fetchNotifications(): Promise<NotificationItem[]> {
     try {
-      const { notifications } = (await this.moltbookAgent.getNotifications({ limit: 15 })).unwrap();
-      const filtered = notifications.filter((n) => {
-        // Never show notifications for our own comments (prevents self-reply loop)
-        if (n.comment?.author?.name === "nimjiagent-sz945r") {
-          return false;
-        }
-        return true;
-      });
+      const { notifications } = (await this.moltbookAgent.getNotifications({ limit: 50 })).unwrap();
 
-      // Fetch post content for comment notifications so AI can defend its posts
+      // Group comment notifications by post so we can fetch authors efficiently (1 call per post)
+      const commentNotifs = notifications.filter((n) => n.type === "comment" || n.type === "comment_reply");
+      const postIds = [...new Set(commentNotifs.map((n) => n.relatedPostId).filter((x): x is string => Boolean(x)))];
+
+      // Build commentId → authorName map by calling listComments on each post
+      const commentAuthorMap = new Map<string, string>();
+      for (const postId of postIds) {
+        try {
+          const commentsResult = await this.moltbookAgent.listComments(postId, { limit: 100 });
+          if (commentsResult.isOk()) {
+            const walk = (comments: any[]) => {
+              for (const c of comments) {
+                if (c.id && c.author?.name) {
+                  commentAuthorMap.set(c.id, c.author.name);
+                }
+                if (c.replies?.length) walk(c.replies);
+              }
+            };
+            walk(commentsResult.value.comments);
+          }
+        } catch {
+          // best effort
+        }
+      }
+
+      // Filter notifications: only keep those where we confirmed the author is NOT us
       const results: NotificationItem[] = [];
-      for (const n of filtered) {
+      for (const n of notifications) {
+        // For comment notifications, verify author via cross-reference
+        if (n.type === "comment" || n.type === "comment_reply") {
+          const commentId = n.relatedCommentId;
+          if (!commentId) continue;
+
+          const author = commentAuthorMap.get(commentId);
+          // Skip if: author is us, author unknown (phantom/deleted), or not found
+          if (!author || author === "nimjiagent-sz945r") continue;
+        }
+
         let postTitle: string | undefined;
         let postContent: string | undefined;
         if (n.relatedPostId && (n.type === "comment" || n.type === "comment_reply" || n.type === "mention")) {
@@ -876,13 +904,18 @@ export class AgentV2 {
               postContent = post.content?.slice(0, 500);
             }
           } catch {
-            // best effort — post may have been deleted
+            // best effort
           }
         }
+
+        const authorName = (n.type === "comment" || n.type === "comment_reply")
+          ? commentAuthorMap.get(n.relatedCommentId ?? "")
+          : undefined;
+
         results.push({
           type: n.type,
           message: n.content,
-          agentName: n.comment?.author?.name,
+          agentName: authorName,
           postId: n.relatedPostId,
           commentId: n.relatedCommentId,
           commentContent: n.comment?.content,
@@ -892,15 +925,15 @@ export class AgentV2 {
         });
 
         // Record foreign stances from comments on our posts
-        if (n.comment?.author?.name && n.comment.author.name !== "nimjiagent-sz945r" && n.comment.content) {
+        if (authorName && authorName !== "nimjiagent-sz945r" && n.comment?.content) {
           this.recordForeignStance(
-            n.comment.author.name,
+            authorName,
             "",
             postTitle ?? n.relatedPostId ?? "unknown",
             n.comment.content.slice(0, 100),
             n.comment.content,
             "comment",
-            n.relatedCommentId ?? `${n.relatedPostId}-${n.comment.author.name}-${Date.now()}`,
+            n.relatedCommentId ?? `${n.relatedPostId}-${authorName}-${Date.now()}`,
           );
         }
       }
