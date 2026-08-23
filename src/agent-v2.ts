@@ -896,7 +896,7 @@ export class AgentV2 {
       }
 
       // Filter notifications: only keep those where we confirmed the author is NOT us
-      const blockedPostIds = new Set(["d7c66376-059f-4a03-9694-5f609c8c2e04"]); // deleted posts with phantom notifications
+      const blockedPostIds = new Set(["d7c66376-059f-4a03-9694-5f609c8c2e04", "3fce4b5f-7113-43bb-b6db-333b0fba0760"]); // deleted/stale posts with phantom notifications
       const results: NotificationItem[] = [];
       for (const n of notifications) {
         // Skip notifications from deleted/blocked posts
