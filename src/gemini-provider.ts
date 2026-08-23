@@ -34,8 +34,6 @@ interface SessionState {
   responseId?: string;
   choiceId?: string;
   cookies?: string;
-  fSid?: string;
-  atToken?: string;
   updatedAt?: string;
 }
 
@@ -160,7 +158,7 @@ export class GeminiProvider implements Provider {
 
     if (refresh) {
       cookies = refresh.cookies;
-      saveSession({ ...saved, cookies: refresh.cookies, fSid: refresh.fSid, atToken: refresh.atToken });
+      saveSession({ ...saved, cookies: refresh.cookies });
       if (process.env.DEBUG) {
         console.log("[gemini-provider] Session refreshed via bard-utils");
       }
