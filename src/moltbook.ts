@@ -504,6 +504,21 @@ Output only the post content, no meta-commentary.`;
   }
 
   /**
+   * Delete a comment.
+   */
+  async deleteComment(commentId: string): Promise<Result<void, MoltbookApiError>> {
+    const { status, data } = await http(`${this.baseUrl}/comments/${commentId}`, {
+      method: "DELETE",
+      headers: { Authorization: `Bearer ${this.apiKey}` },
+    });
+
+    if (status >= 400) {
+      return err(new MoltbookApiError(`Comment delete failed: ${status}`, status, data));
+    }
+    return ok(undefined as void);
+  }
+
+  /**
    * Subscribe to a submolt.
    */
   async subscribe(submoltName: string): Promise<Result<void, MoltbookApiError>> {

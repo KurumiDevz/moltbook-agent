@@ -62,6 +62,8 @@ type MemoryState = {
   taskQueue: TaskQueueItem[];
   /** Comment IDs we've already replied to — prevents double-replies */
   repliedCommentIds: Set<string>;
+  /** Per-post reply count — enforces max 3 replies per post per day */
+  repliedPostCounts: Map<string, number>;
 };
 
 // ── AgentV2 ──────────────────────────────────────────────────────────
@@ -110,6 +112,7 @@ export class AgentV2 {
         ? [...(existingSummary.completedTasks ?? []), ...(existingSummary.pendingTasks ?? [])]
         : [],
       repliedCommentIds: new Set(existingSummary?.repliedCommentIds ?? []),
+      repliedPostCounts: new Map<string, number>(),
     };
 
     // Resume cycle count from last summary
@@ -159,16 +162,26 @@ export class AgentV2 {
     const rateLimits = this.getRateLimits();
     const home = await this.fetchHome();
 
-    // Filter out notifications for comments we already replied to
+    // Filter out: already-replied, self-notifications, and probabilistic per-post cap
     const notifications = allNotifications.filter((n) => {
       if (n.commentId && this.memory.repliedCommentIds.has(n.commentId)) {
-        return false; // already replied — don't show to AI
+        return false; // already replied
+      }
+      // Stochastic per-post cap: 1st=100%, 2nd=70%, 3rd=40%, 4th=15%, 5th+=0%
+      // Lets the AI decide naturally while preventing infinite chains
+      if (n.postId) {
+        const count = this.memory.repliedPostCounts.get(n.postId) ?? 0;
+        const chances = [1.0, 0.7, 0.4, 0.15, 0];
+        const chance = chances[Math.min(count, 4)];
+        if (Math.random() > chance) {
+          return false;
+        }
       }
       return true;
     });
     const filteredCount = allNotifications.length - notifications.length;
     if (filteredCount > 0) {
-      console.log(`   Filtered ${filteredCount} already-replied notifications`);
+      console.log(`   Filtered ${filteredCount} already-replied/self/over-posted notifications`);
     }
 
     // Merge hot feed + semantic search results (deduplicate by id)
@@ -494,6 +507,10 @@ export class AgentV2 {
     // Track this comment ID so we never reply to it again
     this.memory.repliedCommentIds.add(decision.commentId);
 
+    // Track per-post reply count for stochastic cap
+    const postCount = this.memory.repliedPostCounts.get(decision.postId) ?? 0;
+    this.memory.repliedPostCounts.set(decision.postId, postCount + 1);
+
     // Mark notifications as read for the post we replied on (best effort)
     try {
       await this.moltbookAgent.markNotificationsRead(decision.postId);
@@ -615,15 +632,23 @@ export class AgentV2 {
   private async fetchNotifications(): Promise<NotificationItem[]> {
     try {
       const { notifications } = (await this.moltbookAgent.getNotifications({ limit: 15 })).unwrap();
-      return notifications.map((n) => ({
-        type: n.type,
-        message: n.content,
-        agentName: n.comment?.author?.name,
-        postId: n.relatedPostId,
-        commentId: n.relatedCommentId,
-        commentContent: n.comment?.content,
-        createdAt: n.createdAt,
-      }));
+      return notifications
+        .filter((n) => {
+          // Never show notifications for our own comments (prevents self-reply loop)
+          if (n.comment?.author?.name === "nimjiagent-sz945r") {
+            return false;
+          }
+          return true;
+        })
+        .map((n) => ({
+          type: n.type,
+          message: n.content,
+          agentName: n.comment?.author?.name,
+          postId: n.relatedPostId,
+          commentId: n.relatedCommentId,
+          commentContent: n.comment?.content,
+          createdAt: n.createdAt,
+        }));
     } catch {
       return [];
     }
