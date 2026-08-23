@@ -217,18 +217,18 @@ export class AgentV2 {
     const rateLimits = this.getRateLimits();
     const home = await this.fetchHome();
 
-    // Filter out: already-replied, self-notifications, and probabilistic per-thread cap
+    // Filter out: already-replied, self-notifications, and stochastic per-thread cap
+    // Stochastic keeps it natural — not robotic. But cap is tight to prevent spam.
     const notifications = allNotifications.filter((n) => {
       if (n.commentId && this.memory.repliedCommentIds.has(n.commentId)) {
         return false; // already replied
       }
-      // Stochastic per-thread cap: 1st=100%, 2nd=70%, 3rd=40%, 4th=15%, 5th+=0%
-      // Thread key = parent comment (reply thread) or comment itself (top-level)
+      // Per-thread stochastic cap: 1st=100%, 2nd=30%, 3rd+=0%
       if (n.commentId) {
-        const threadKey = n.commentId; // the comment being replied to is the thread root
+        const threadKey = n.commentId;
         const count = this.memory.repliedThreadCounts.get(threadKey) ?? 0;
-        const chances = [1.0, 0.7, 0.4, 0.15, 0];
-        const chance = chances[Math.min(count, 4)];
+        const chances = [1.0, 0.3, 0];
+        const chance = chances[Math.min(count, 2)];
         if (Math.random() > chance) {
           return false;
         }
@@ -238,13 +238,6 @@ export class AgentV2 {
     const filteredCount = allNotifications.length - notifications.length;
     if (filteredCount > 0) {
       console.log(`   Filtered ${filteredCount} already-replied/self/over-posted notifications`);
-    }
-
-    // Mark all notifications as read so phantom/dead ones clear out
-    try {
-      await this.moltbookAgent.markNotificationsRead();
-    } catch {
-      // Non-critical — just means unread count won't decrease
     }
 
     // Merge hot feed + semantic search results (deduplicate by id)
@@ -390,27 +383,27 @@ export class AgentV2 {
       } as AgentDecision;
     }
 
-    // 5. Add task to queue before executing
+    // 5. Add task to queue before executing (use finalDecision after revalidation)
     const task = this.summaryGen.addTask(
       this.memory.taskQueue,
-      decision.action === "post"
+      finalDecision.action === "post"
         ? "post"
-        : decision.action === "comment"
+        : finalDecision.action === "comment"
           ? "comment"
-          : decision.action === "upvote"
+          : finalDecision.action === "upvote"
             ? "upvote"
-            : decision.action === "follow"
+            : finalDecision.action === "follow"
               ? "follow"
               : "engage",
-      decision.reason,
-      decision.action === "post"
-        ? decision.topic
-        : decision.action === "comment"
-          ? decision.postId
-          : decision.action === "upvote"
-            ? decision.postId
-            : decision.action === "follow"
-              ? decision.agentName
+      finalDecision.reason,
+      finalDecision.action === "post"
+        ? finalDecision.topic
+        : finalDecision.action === "comment"
+          ? finalDecision.postId
+          : finalDecision.action === "upvote"
+            ? finalDecision.postId
+            : finalDecision.action === "follow"
+              ? finalDecision.agentName
               : undefined,
     );
 
@@ -431,11 +424,20 @@ export class AgentV2 {
       /* best effort */
     }
 
-    // 6. Execute
+    // 6. Execute (use finalDecision after revalidation, NOT original decision)
     console.log("⚡ Executing...");
-    const result = await this.execute(decision);
+    const result = await this.execute(finalDecision);
     const emoji = result.success ? "✅" : "❌";
     console.log(`   ${emoji} ${result.message}`);
+
+    // 6b. Mark this post's notifications as read after acting (not blanket clear)
+    if (result.success && finalDecision.action !== "scroll" && "postId" in finalDecision) {
+      try {
+        await this.moltbookAgent.markNotificationsRead(finalDecision.postId);
+      } catch {
+        /* best effort — just means unread count won't decrease for this post */
+      }
+    }
 
     // 7. Update task status
     if (result.success) {
