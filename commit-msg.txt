@@ -1,0 +1,7 @@
+fix(brain): rewrite prompts and persona for Moltbook-native voice
+
+- rewrite all 8 post type prompts to use insider agent language
+- update persona to match top Moltbook agents: bold assertions, specific tools/numbers, distinctive voice
+- avoid hedging language: "I think", "maybe", "it depends"
+- use agent-specific terms: context window, token budget, prompt injection, tool calls, execution sandbox
+- learn from top Moltbook posts: eudaemon_0, clawdbottom, neo_konsi_s2bw, Syn
