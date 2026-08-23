@@ -12,7 +12,7 @@ import type { MoltbookAgent } from "./moltbook.js";
 import type { Gateway } from "./gateway.js";
 import { BrainV2, type AgentDecision, type FeedPost, type NotificationItem, type RateLimitState } from "./brain-v2.js";
 import { runSubAgentTask, type ScoredPost } from "./sub-agent.js";
-import { SummaryGenerator, type ActivitySummary } from "./summary.js";
+import { SummaryGenerator, type ActivitySummary, type TaskQueueItem } from "./summary.js";
 
 // ── Types ────────────────────────────────────────────────────────────
 
@@ -59,6 +59,7 @@ type MemoryState = {
   commentsToday: number;
   lastCommentAt: number;
   lastPostAt: number;
+  taskQueue: TaskQueueItem[];
 };
 
 // ── AgentV2 ──────────────────────────────────────────────────────────
@@ -89,6 +90,11 @@ export class AgentV2 {
     this.summaryGen = new SummaryGenerator(config.dataDir);
     this.submolts = config.submolts ?? ["general", "agents", "builds"];
     this.summaryInterval = config.summaryInterval ?? 5;
+
+    // Load existing summary to resume task queue
+    const existingSummary = this.summaryGen.load();
+    this.lastSummary = existingSummary;
+
     this.memory = {
       postHistory: [],
       topicsSeen: [],
@@ -98,7 +104,21 @@ export class AgentV2 {
       commentsToday: 0,
       lastCommentAt: 0,
       lastPostAt: 0,
+      taskQueue: existingSummary
+        ? [...(existingSummary.completedTasks ?? []), ...(existingSummary.pendingTasks ?? [])]
+        : [],
     };
+
+    // Resume cycle count from last summary
+    if (existingSummary?.lastCycleNumber) {
+      this.cycleCount = existingSummary.lastCycleNumber;
+    }
+
+    // Log resumed state
+    if (existingSummary) {
+      const pending = this.memory.taskQueue.filter((t) => t.status === "pending");
+      console.log(`📋 Resumed from cycle #${this.cycleCount} — ${pending.length} pending tasks`);
+    }
   }
 
   /** Start the autonomous loop. */
@@ -174,7 +194,7 @@ export class AgentV2 {
     console.log(`   Feed: ${feed.length} posts | Notifications: ${notifications.length}`);
     console.log(`   Rate limits: post=${rateLimits.canPost} comment=${rateLimits.canComment}`);
 
-    // 3. Generate activity summary periodically
+    // 3. Generate activity summary periodically (with task queue)
     let summaryText: string | undefined;
     if (this.cycleCount % this.summaryInterval === 0 || !this.lastSummary) {
       console.log("📊 Generating activity summary...");
@@ -183,7 +203,11 @@ export class AgentV2 {
           this.memory.postHistory,
           [], // interactions (could track these later)
           0, // karma (could fetch from API)
+          this.memory.taskQueue,
+          this.cycleCount,
         );
+        // Clean up old completed tasks
+        this.memory.taskQueue = this.summaryGen.cleanupQueue(this.memory.taskQueue);
         this.summaryGen.save(this.lastSummary);
         summaryText = this.summaryGen.formatForPrompt(this.lastSummary);
         console.log(`   Summary: ${this.lastSummary.insight}`);
@@ -207,11 +231,58 @@ export class AgentV2 {
 
     console.log(`   Decision: ${decision.action} — ${decision.reason}`);
 
-    // 5. Execute
+    // 5. Add task to queue before executing
+    const task = this.summaryGen.addTask(
+      this.memory.taskQueue,
+      decision.action === "post" ? "post" :
+      decision.action === "comment" ? "comment" :
+      decision.action === "upvote" ? "upvote" :
+      decision.action === "follow" ? "follow" : "engage",
+      decision.reason,
+      decision.action === "post" ? (decision as any).topic :
+      decision.action === "comment" ? (decision as any).postId :
+      decision.action === "upvote" ? (decision as any).postId :
+      decision.action === "follow" ? (decision as any).agentName : undefined,
+    );
+
+    // Persist pending task immediately (crash resilience: task survives mid-cycle crash)
+    try {
+      const preExecSummary = this.summaryGen.generate(
+        this.memory.postHistory,
+        [],
+        0,
+        this.memory.taskQueue,
+        this.cycleCount,
+      );
+      this.summaryGen.save(preExecSummary);
+      this.lastSummary = preExecSummary;
+    } catch { /* best effort */ }
+
+    // 6. Execute
     console.log("⚡ Executing...");
     const result = await this.execute(decision);
     const emoji = result.success ? "✅" : "❌";
     console.log(`   ${emoji} ${result.message}`);
+
+    // 7. Update task status
+    if (result.success) {
+      this.summaryGen.completeTask(this.memory.taskQueue, task.id, result.message);
+    } else {
+      this.summaryGen.failTask(this.memory.taskQueue, task.id, result.message);
+    }
+
+    // 8. Save summary after each cycle (persist task state)
+    try {
+      const cycleSummary = this.summaryGen.generate(
+        this.memory.postHistory,
+        [],
+        0,
+        this.memory.taskQueue,
+        this.cycleCount,
+      );
+      this.summaryGen.save(cycleSummary);
+      this.lastSummary = cycleSummary;
+    } catch { /* best effort save */ }
 
     return result;
   }

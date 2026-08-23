@@ -6,9 +6,11 @@
  * - Topics already covered
  * - Agents interacted with
  * - Engagement trends
+ * - Task queue: what's done, what's pending, what's next
  *
  * The summary is regenerated periodically (every N cycles) by the sub-agent
  * and cached on disk. The main AI reads it as context.
+ * On restart, the agent reads the summary and resumes from where it left off.
  */
 
 import { readFileSync, writeFileSync, existsSync } from "node:fs";
@@ -31,6 +33,19 @@ export type AgentInteraction = {
   type: string; // "commented_on", "upvoted_by", "followed"
   count: number;
   lastAt: number;
+};
+
+export type TaskStatus = "pending" | "in_progress" | "completed" | "failed" | "skipped";
+
+export type TaskQueueItem = {
+  id: string;
+  type: "post" | "comment" | "upvote" | "follow" | "engage";
+  description: string;
+  target?: string; // post ID, agent name, topic, etc.
+  status: TaskStatus;
+  createdAt: number;
+  completedAt?: number;
+  result?: string; // success/failure message
 };
 
 export type ActivitySummary = {
@@ -56,6 +71,14 @@ export type ActivitySummary = {
   engagementTrend: string;
   /** One-line insight for the AI */
   insight: string;
+  /** Task queue: completed tasks */
+  completedTasks: TaskQueueItem[];
+  /** Task queue: pending tasks not yet started */
+  pendingTasks: TaskQueueItem[];
+  /** What the agent should do next on resume */
+  nextAction: string;
+  /** Last cycle number when this summary was generated */
+  lastCycleNumber: number;
 };
 
 // ── Summary Generator ────────────────────────────────────────────────
@@ -68,13 +91,15 @@ export class SummaryGenerator {
   }
 
   /**
-   * Generate a compact summary from raw post history and interactions.
+   * Generate a compact summary from raw post history, interactions, and task queue.
    * This is what the sub-agent produces periodically.
    */
   generate(
     postHistory: PostSummary[],
     interactions: Array<{ type: string; target?: string; agentName?: string; timestamp: number }>,
     karma: number,
+    taskQueue: TaskQueueItem[] = [],
+    cycleNumber = 0,
   ): ActivitySummary {
     // Post type performance
     const typeMap = new Map<string, { count: number; totalUpvotes: number }>();
@@ -152,6 +177,16 @@ export class SummaryGenerator {
       ? `Best performing: ${bestType.type} (${bestType.avgUpvotes}↑ avg). Posted to ${submoltActivity[0]?.submolt ?? "none"} most.`
       : "No posts yet — ready to start.";
 
+    // Task queue split
+    const completedTasks = taskQueue.filter((t) => t.status === "completed" || t.status === "failed");
+    const pendingTasks = taskQueue.filter((t) => t.status === "pending" || t.status === "in_progress");
+
+    // Next action: first pending task or default
+    const nextPending = pendingTasks[0];
+    const nextAction = nextPending
+      ? `${nextPending.type}: ${nextPending.description}`
+      : "Check feed for engagement opportunities";
+
     return {
       generatedAt: Date.now(),
       totalPosts: postHistory.length,
@@ -164,6 +199,10 @@ export class SummaryGenerator {
       agentsInteracted,
       engagementTrend,
       insight,
+      completedTasks: completedTasks.slice(-20), // last 20 completed
+      pendingTasks,
+      nextAction,
+      lastCycleNumber: cycleNumber,
     };
   }
 
@@ -189,7 +228,7 @@ export class SummaryGenerator {
 
   /**
    * Format summary as compact text for the AI prompt.
-   * This replaces sending raw history.
+   * This replaces sending raw history. Includes task queue status.
    */
   formatForPrompt(summary: ActivitySummary): string {
     const lines: string[] = [];
@@ -224,6 +263,82 @@ export class SummaryGenerator {
       lines.push(`- Topics covered (last ${Math.min(summary.topicsCovered.length, 15)}): ${summary.topicsCovered.slice(0, 15).join("; ")}`);
     }
 
+    // Task queue status
+    const completedTasks = summary.completedTasks ?? [];
+    const pendingTasks = summary.pendingTasks ?? [];
+
+    if (completedTasks.length > 0) {
+      lines.push(`- Completed tasks (${completedTasks.length}):`);
+      for (const t of completedTasks.slice(-5)) {
+        const status = t.status === "completed" ? "✅" : "❌";
+        lines.push(`  - ${status} ${t.type}: ${t.description}${t.result ? ` → ${t.result}` : ""}`);
+      }
+    }
+
+    if (pendingTasks.length > 0) {
+      lines.push(`- Pending tasks (${pendingTasks.length}):`);
+      for (const t of pendingTasks.slice(0, 5)) {
+        const status = t.status === "in_progress" ? "🔄" : "⏳";
+        lines.push(`  - ${status} ${t.type}: ${t.description}`);
+      }
+    }
+
+    lines.push(`- Next action: ${summary.nextAction ?? "Check feed for engagement opportunities"}`);
+    lines.push(`- Last cycle: #${summary.lastCycleNumber ?? 0}`);
+
     return lines.join("\n");
+  }
+
+  // ── Task Queue Management ──────────────────────────────────────────
+
+  /** Add a task to the queue. Returns the task with generated ID. */
+  addTask(
+    queue: TaskQueueItem[],
+    type: TaskQueueItem["type"],
+    description: string,
+    target?: string,
+  ): TaskQueueItem {
+    const task: TaskQueueItem = {
+      id: `task-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`,
+      type,
+      description,
+      target,
+      status: "pending",
+      createdAt: Date.now(),
+    };
+    queue.push(task);
+    return task;
+  }
+
+  /** Mark a task as completed. */
+  completeTask(queue: TaskQueueItem[], taskId: string, result: string): void {
+    const task = queue.find((t) => t.id === taskId);
+    if (task) {
+      task.status = "completed";
+      task.completedAt = Date.now();
+      task.result = result;
+    }
+  }
+
+  /** Mark a task as failed. */
+  failTask(queue: TaskQueueItem[], taskId: string, result: string): void {
+    const task = queue.find((t) => t.id === taskId);
+    if (task) {
+      task.status = "failed";
+      task.completedAt = Date.now();
+      task.result = result;
+    }
+  }
+
+  /** Get the next pending task. */
+  getNextTask(queue: TaskQueueItem[]): TaskQueueItem | null {
+    return queue.find((t) => t.status === "pending") ?? null;
+  }
+
+  /** Clean up old completed tasks (keep last N). */
+  cleanupQueue(queue: TaskQueueItem[], keepLast = 20): TaskQueueItem[] {
+    const pending = queue.filter((t) => t.status === "pending" || t.status === "in_progress");
+    const completed = queue.filter((t) => t.status === "completed" || t.status === "failed");
+    return [...pending, ...completed.slice(-keepLast)];
   }
 }
