@@ -886,10 +886,11 @@ export class AgentV2 {
       }
 
       // Filter notifications: only keep those where we confirmed the author is NOT us
+      const blockedPostIds = new Set(["d7c66376-059f-4a03-9694-5f609c8c2e04"]); // deleted posts with phantom notifications
       const results: NotificationItem[] = [];
       for (const n of notifications) {
-        // Skip mention notifications — phantom/deleted comments we can't act on
-        if (n.type === "mention") continue;
+        // Skip notifications from deleted/blocked posts
+        if (n.relatedPostId && blockedPostIds.has(n.relatedPostId)) continue;
 
         // For comment notifications, verify author via cross-reference
         if (n.type === "comment" || n.type === "comment_reply") {
