@@ -262,7 +262,7 @@ export class AgentV2 {
     console.log(`\n── Cycle ${this.cycleCount} ──`);
 
     // Rotate stale conversations to prevent hallucination loops
-    const convoKeys = ["main", "revalidate"];
+    const convoKeys = ["main", "revalidate", "sub-score"];
     for (const key of convoKeys) {
       if (shouldRotateConversation(key, 12 * 60 * 60 * 1000)) {
         deleteConversation(key);
@@ -333,7 +333,7 @@ export class AgentV2 {
         agentValues: ["security", "craft", "honesty", "autonomy"],
         prompt: "",
       };
-      const scored = await runSubAgentTask(task, (opts) => this.gateway.generate(opts), this.subAgentModel);
+      const scored = await runSubAgentTask(task, (opts) => this.gateway.generate({ ...opts, conversationKey: "sub-score" }), this.subAgentModel);
       feed = (scored as { type: "scored_feed"; posts: ScoredPost[] }).posts.map((p) => ({
         id: p.id,
         title: p.title,
