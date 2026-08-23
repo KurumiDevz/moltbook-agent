@@ -764,11 +764,12 @@ Output only the post content, no meta-commentary.`;
         notifications: Array<{
           id: string;
           type: string;
-          message: string;
-          post_id?: string;
-          agent_name?: string;
-          created_at: string;
-          read: boolean;
+          content: string;
+          relatedPostId?: string;
+          relatedCommentId?: string;
+          comment?: { id: string; content: string; postId: string; parentId?: string };
+          isRead: boolean;
+          createdAt: string;
         }>;
       },
       MoltbookApiError

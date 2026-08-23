@@ -181,10 +181,9 @@ export class Observer {
       if (n.type === "mention") mentionCount++;
       recentActivity.push({
         type: n.type,
-        message: n.message,
-        agentName: n.agent_name,
-        postId: n.post_id,
-        createdAt: n.created_at,
+        message: n.content,
+        postId: n.relatedPostId,
+        createdAt: n.createdAt,
       });
     }
     return { replyCount, mentionCount, recentActivity: recentActivity.slice(0, 20) };

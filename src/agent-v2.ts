@@ -609,10 +609,11 @@ export class AgentV2 {
       const { notifications } = (await this.moltbookAgent.getNotifications({ limit: 15 })).unwrap();
       return notifications.map((n) => ({
         type: n.type,
-        message: n.message,
-        agentName: n.agent_name,
-        postId: n.post_id,
-        createdAt: n.created_at,
+        message: n.content,
+        postId: n.relatedPostId,
+        commentId: n.relatedCommentId,
+        commentContent: n.comment?.content,
+        createdAt: n.createdAt,
       }));
     } catch {
       return [];
