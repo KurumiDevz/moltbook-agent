@@ -3,16 +3,26 @@
  * Uses browser cookies to authenticate with Google's Gemini web API.
  *
  * Mirrors nimji CLI behavior:
- * - Session store persistence (session.json) for conversation continuity
+ * - Session store persistence for conversation continuity
  * - Retry with fresh client on partial streams
  * - Session recovery: reset conversation + retry when stuck
  * - Keepalive timer to prevent session expiry
+ *
+ * Hardened conversation isolation:
+ * - Cookies: shared in data/gemini-session.json (backward compatible)
+ * - Conversations: per-key in data/sessions/<key>.json
+ * - Main agent uses "main", sub-agents get unique keys
  */
 
-import { readFileSync, writeFileSync, mkdirSync, existsSync } from "node:fs";
-import path from "node:path";
 import { create, type GemaiClient } from "nimji";
 import { http } from "./http.js";
+import {
+  loadCookies,
+  saveCookies,
+  loadConversation,
+  saveConversation,
+  type ConversationState,
+} from "./session-manager.js";
 import type {
   GenerateRequest,
   GenerateResponse,
@@ -26,41 +36,9 @@ export type GeminiProviderConfig = ProviderConfig & {
   readonly cookies?: string;
   /** Model to use: flash, pro, flash-lite, extended */
   readonly model?: string;
+  /** Conversation key for isolation (default: "main") */
+  readonly conversationKey?: string;
 };
-
-/** Session state persisted to disk */
-interface SessionState {
-  conversationId?: string;
-  responseId?: string;
-  choiceId?: string;
-  cookies?: string;
-  updatedAt?: string;
-}
-
-const SESSION_DIR = path.resolve(process.cwd(), "data");
-const SESSION_FILE = path.resolve(SESSION_DIR, "gemini-session.json");
-
-// ─── Session store (mirrors nimji CLI's createSessionStore) ───
-
-function loadSession(): SessionState {
-  try {
-    if (existsSync(SESSION_FILE)) {
-      return JSON.parse(readFileSync(SESSION_FILE, "utf-8"));
-    }
-  } catch { /* ignore */ }
-  return {};
-}
-
-function saveSession(state: SessionState): void {
-  try {
-    mkdirSync(SESSION_DIR, { recursive: true });
-    writeFileSync(SESSION_FILE, JSON.stringify({ ...state, updatedAt: new Date().toISOString() }, null, 2));
-  } catch { /* ignore */ }
-}
-
-function clearSession(): void {
-  saveSession({});
-}
 
 // ─── Session refresh via bard-utils ───
 
@@ -114,8 +92,6 @@ function classifyResponse(value: { text: string | null; meta: { statusCode: numb
   return "none";
 }
 
-const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
-
 // ─── Gemini provider ───
 
 export class GeminiProvider implements Provider {
@@ -124,6 +100,7 @@ export class GeminiProvider implements Provider {
   private client: GemaiClient | null = null;
   private config: GeminiProviderConfig | null = null;
   private defaultModel: string;
+  private conversationKey: string;
   private keepaliveTimer: ReturnType<typeof setInterval> | null = null;
   private refreshTimer: ReturnType<typeof setInterval> | null = null;
   private effectiveCookies: string = "";
@@ -132,10 +109,12 @@ export class GeminiProvider implements Provider {
 
   constructor() {
     this.defaultModel = "flash";
+    this.conversationKey = "main";
   }
 
   async initialize(config: GeminiProviderConfig): Promise<void> {
     this.config = config;
+    this.conversationKey = config.conversationKey ?? "main";
 
     let cookies = config.cookies ?? (config.options?.cookies as string) ?? process.env.COOKIES ?? "";
     if (!cookies) {
@@ -147,9 +126,6 @@ export class GeminiProvider implements Provider {
 
     this.defaultModel = config.defaultModel ?? (config.options?.model as string) ?? "flash";
 
-    // Load persisted session if available
-    const saved = loadSession();
-
     // Refresh session via bard-utils (extracts fSid, atToken, rotates cookies)
     const refresh = await refreshSession({
       cookies,
@@ -158,7 +134,7 @@ export class GeminiProvider implements Provider {
 
     if (refresh) {
       cookies = refresh.cookies;
-      saveSession({ ...saved, cookies: refresh.cookies });
+      saveCookies({ cookies: refresh.cookies });
       if (process.env.DEBUG) {
         console.log("[gemini-provider] Session refreshed via bard-utils");
       }
@@ -169,8 +145,6 @@ export class GeminiProvider implements Provider {
     this.effectiveAtToken = refresh?.atToken ?? "";
 
     // Create nimji client with refreshed cookies + auth tokens
-    // nimji requires AT_TOKEN and F_SID for authenticated requests
-    // Increase stream timeouts for longer responses (default 30s idle cuts off mid-generation)
     this.client = create({
       COOKIES: cookies,
       MODEL: this.defaultModel,
@@ -180,7 +154,8 @@ export class GeminiProvider implements Provider {
       ...config.options,
     });
 
-    // Restore conversation state from session store
+    // Restore conversation state from per-key session store
+    const saved = loadConversation(this.conversationKey);
     if (saved.conversationId) {
       this.client.setConversation({
         conversationId: saved.conversationId,
@@ -188,18 +163,18 @@ export class GeminiProvider implements Provider {
         choiceId: saved.choiceId,
       });
       if (process.env.DEBUG) {
-        console.log(`[gemini-provider] Restored conversation: ${saved.conversationId}`);
+        console.log(`[gemini-provider] Restored conversation "${this.conversationKey}": ${saved.conversationId}`);
       }
     }
 
-    // Start keepalive (10 min) + cookie rotation (8 min) — same as nimji CLI
+    // Start keepalive (10 min) + cookie rotation (8 min)
     this.startKeepalive();
   }
 
   private startKeepalive(): void {
     if (this.keepaliveTimer) return;
 
-    // Keepalive ping every 10 minutes to keep session alive
+    // Keepalive ping every 10 minutes
     this.keepaliveTimer = setInterval(async () => {
       if (!this.client) return;
       try {
@@ -222,7 +197,7 @@ export class GeminiProvider implements Provider {
       });
       if (refresh) {
         this.effectiveCookies = refresh.cookies;
-        saveSession({ ...loadSession(), cookies: refresh.cookies });
+        saveCookies({ cookies: refresh.cookies });
         if (process.env.DEBUG) {
           console.log("[gemini-provider] Cookies rotated");
         }
@@ -309,13 +284,12 @@ export class GeminiProvider implements Provider {
       }
     }
 
-    // Persist conversation state to session store
+    // Persist conversation state to per-key session store
     const conv = this.client.getConversation();
-    saveSession({
+    saveConversation(this.conversationKey, {
       conversationId: conv.conversationId,
       responseId: conv.responseId,
       choiceId: conv.choiceId,
-      cookies: this.effectiveCookies,
     });
 
     const res = result.value;
