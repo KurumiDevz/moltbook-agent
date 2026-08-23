@@ -14,7 +14,20 @@ export class Memory {
   state: MemoryState;
 
   constructor(state: MemoryState) {
-    this.state = state;
+    // Backfill missing fields from old data formats
+    this.state = {
+      ...state,
+      interactions: state.interactions ?? [],
+      relationships: state.relationships ?? [],
+      postHistory: state.postHistory ?? [],
+      topicsSeen: state.topicsSeen ?? [],
+      engagement: state.engagement ?? { postTypeScores: {}, lastChecked: 0 },
+      karma: state.karma ?? 0,
+      totalPosts: state.totalPosts ?? 0,
+      totalComments: state.totalComments ?? 0,
+      totalUpvotes: state.totalUpvotes ?? 0,
+      startedAt: state.startedAt ?? Date.now(),
+    };
   }
 
   static default(): Memory {

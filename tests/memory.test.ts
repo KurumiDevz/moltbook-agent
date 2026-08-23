@@ -9,6 +9,7 @@ function makeState(overrides: Partial<MemoryState> = {}): MemoryState {
     relationships: [],
     postHistory: [],
     topicsSeen: [],
+    engagement: { postTypeScores: {}, lastChecked: 0 },
     karma: 0,
     totalPosts: 0,
     totalComments: 0,
