@@ -1,9 +1,10 @@
 /**
  * Brain V2 — Prompt-driven agent intelligence with skill selection.
  *
- * Two-phase decide:
+ * Three-phase decide:
  *   Phase 1: AI selects which skill to use (sees context + skill list)
  *   Phase 2: AI makes decision (sees context + full skill content)
+ *   Phase 3: AI revalidates its own decision before execution
  *
  * Skills are .md files in the skills/ directory. Each teaches ONE behavior.
  */
@@ -252,9 +253,10 @@ export class BrainV2 {
   }
 
   /**
-   * Two-phase decide:
+   * Three-phase decide:
    *   Phase 1: AI selects skill (sees context + skill list)
    *   Phase 2: AI makes decision (sees context + skill content)
+   *   Phase 3: AI revalidates decision (see revalidateDecision())
    */
   async decide(context: {
     feed: FeedPost[];
@@ -311,6 +313,119 @@ export class BrainV2 {
     if (retryParsed) return retryParsed;
 
     return { action: "scroll", reason: "failed_to_parse_ai_output" };
+  }
+
+  /** Phase 3: Revalidate a decision before execution. AI checks itself. */
+  async revalidateDecision(
+    decision: AgentDecision,
+    context: {
+      repliedPostCounts: Map<string, number>;
+      commentsToday: number;
+      recentActions: string[];
+      notificationAgentNames: string[];
+    },
+  ): Promise<{ valid: boolean; fallback?: string; reason: string }> {
+    // Hard safety valve — AI can't override this
+    if (decision.action === "reply_to_comment" || decision.action === "comment") {
+      const postCount = context.repliedPostCounts.get("postId" in decision ? decision.postId : "") ?? 0;
+      if (postCount >= 5) {
+        return { valid: false, fallback: "scroll", reason: `Hard limit: already replied ${postCount} times to this post` };
+      }
+    }
+
+    // Daily comment limit safety
+    if ((decision.action === "comment" || decision.action === "reply_to_comment") && context.commentsToday >= 30) {
+      return { valid: false, fallback: "scroll", reason: `Daily comment limit: ${context.commentsToday}/50 used` };
+    }
+
+    // AI revalidation for reply/comment decisions
+    if (decision.action === "reply_to_comment" || decision.action === "comment") {
+      const prompt = this.buildRevalidationPrompt(decision, context);
+      const response = await this.gateway.generate({
+        model: this.model,
+        prompt,
+        temperature: 0.3,
+      });
+      const parsed = this.parseRevalidation(response.text);
+      if (parsed && !parsed.valid) {
+        return parsed;
+      }
+    }
+
+    // Non-reply decisions pass through (post, upvote, follow, scroll, rest are fine)
+    return { valid: true, reason: "passed" };
+  }
+
+  private buildRevalidationPrompt(
+    decision: AgentDecision,
+    context: {
+      repliedPostCounts: Map<string, number>;
+      commentsToday: number;
+      recentActions: string[];
+      notificationAgentNames: string[];
+    },
+  ): string {
+    const postCount = context.repliedPostCounts.get("postId" in decision ? decision.postId : "") ?? 0;
+    const sections: string[] = [];
+
+    sections.push("# Decision Revalidation Checkpoint");
+    sections.push("");
+    sections.push("You previously decided to take this action. Now review whether it's still a good idea.");
+    sections.push("");
+    sections.push("## Your Decision");
+    sections.push(`- Action: ${decision.action}`);
+    sections.push(`- Reason: ${decision.reason}`);
+    if ("content" in decision && decision.content) {
+      sections.push(`- Content preview: "${(decision.content as string).slice(0, 200)}"`);
+    }
+    if ("postId" in decision) {
+      sections.push(`- Target post: ${decision.postId}`);
+    }
+    if ("commentId" in decision) {
+      sections.push(`- Target comment: ${decision.commentId}`);
+    }
+    sections.push("");
+    sections.push("## Context");
+    sections.push(`- Replies to this post so far: ${postCount}`);
+    sections.push(`- Comments today: ${context.commentsToday}/50`);
+    sections.push(`- Recent actions: ${context.recentActions.slice(-5).join(", ") || "none yet"}`);
+    if (context.notificationAgentNames.length > 0) {
+      sections.push(`- Agents in notifications: ${context.notificationAgentNames.join(", ")}`);
+    }
+    sections.push("");
+    sections.push("## Rules");
+    sections.push("- You may reply to the SAME post at most 2 times total (not counting this one)");
+    sections.push("- If you already replied twice to this post, reject unless it's a direct question to you");
+    sections.push("- If the last 3 actions were all replies/comments, prefer scroll or upvote instead");
+    sections.push("- Generic one-liner replies are noise — reject them");
+    sections.push("- If the comment is spam (crypto, DEUSPROOF, generic praise), reject");
+    sections.push("");
+    sections.push("Respond with ONLY a JSON object:");
+    sections.push("```json");
+    sections.push('{ "valid": true, "reason": "brief explanation" }');
+    sections.push("```");
+    sections.push("OR");
+    sections.push("```json");
+    sections.push('{ "valid": false, "fallback": "scroll", "reason": "brief explanation" }');
+    sections.push("```");
+
+    return sections.join("\n");
+  }
+
+  private parseRevalidation(response: string): { valid: boolean; fallback?: string; reason: string } | null {
+    try {
+      const jsonMatch = response.match(/\{[\s\S]*\}/);
+      if (!jsonMatch) return null;
+      const parsed = JSON.parse(jsonMatch[0]);
+      if (typeof parsed.valid !== "boolean") return null;
+      return {
+        valid: parsed.valid,
+        fallback: parsed.fallback ?? "scroll",
+        reason: parsed.reason ?? "revalidation checkpoint",
+      };
+    } catch {
+      return null; // On parse failure, let the decision through (fail-open)
+    }
   }
 
   /** Parse skill selection from Phase 1 output. Falls back to "engagement-strategy". */

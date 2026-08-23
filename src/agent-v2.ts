@@ -118,7 +118,11 @@ export class AgentV2 {
         ? [...(existingSummary.completedTasks ?? []), ...(existingSummary.pendingTasks ?? [])]
         : [],
       repliedCommentIds: new Set(existingSummary?.repliedCommentIds ?? []),
-      repliedPostCounts: new Map<string, number>(),
+      repliedPostCounts: new Map<string, number>(
+        existingSummary?.repliedPostCounts
+          ? Object.entries(existingSummary.repliedPostCounts)
+          : [],
+      ),
       stances: existingSummary?.stances ?? [],
       foreignStances: existingSummary?.foreignStances ?? [],
     };
@@ -299,6 +303,23 @@ export class AgentV2 {
     });
 
     console.log(`   Decision: ${decision.action} — ${decision.reason}`);
+
+    // Phase 3: AI revalidates its own decision
+    const revalidation = await this.brain.revalidateDecision(decision, {
+      repliedPostCounts: this.memory.repliedPostCounts,
+      commentsToday: this.memory.commentsToday,
+      recentActions: this.memory.taskQueue.slice(-5).map((t) => `${t.type}: ${t.description}`),
+      notificationAgentNames: notifications.filter((n) => n.agentName).map((n) => n.agentName!),
+    });
+
+    let finalDecision = decision;
+    if (!revalidation.valid) {
+      console.log(`   🛑 Revalidation rejected: ${revalidation.reason}`);
+      finalDecision = {
+        action: (revalidation.fallback ?? "scroll") as AgentDecision["action"],
+        reason: revalidation.reason,
+      } as AgentDecision;
+    }
 
     // 5. Add task to queue before executing
     const task = this.summaryGen.addTask(

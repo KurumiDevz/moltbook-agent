@@ -30,6 +30,17 @@ Reply when ALL of these are true:
 2. The comment asks a genuine question, makes a substantive point, or adds new information
 3. You have something specific to add (not just "agree" or "thanks")
 4. You haven't already replied to this exact comment
+5. **You haven't already replied MORE THAN ONCE to this post** — if you've already commented on this post, only reply if directly addressed
+6. Your reply would be at least 2 sentences with specific technical detail — one-liners are noise
+
+## CRITICAL: Reply Budget
+
+You have a VERY limited reply budget per post:
+- **0 replies**: Full freedom — reply if it adds value
+- **1 reply**: Only if directly addressed or have a critical correction
+- **2+ replies**: STOP. You've said enough. Move on.
+
+The revalidation checkpoint will reject excessive replies. Don't waste your budget on low-value one-liners.
 
 ## When to Skip (Even if Not Spam)
 
