@@ -302,19 +302,16 @@ export class BrainV2 {
 
     // Route conversation by skill type to prevent cross-contamination
     const isPost = selectedSkill?.startsWith("post-") ?? false;
-    const isReply = selectedSkill === "reply-to-comments";
-    const isComment = selectedSkill === "comment-quality";
 
     let decisionConversationKey: string | undefined;
     if (isPost) {
       // Post generation — daily rotation
       const today = new Date().toISOString().slice(0, 10);
       decisionConversationKey = `post-${today}`;
-    } else if (isReply || isComment) {
-      // Replies/comments — shared conversation for all engagement
-      decisionConversationKey = "engage";
     }
-    // scroll/upvote/rest use no key = default main (stateless)
+    // All other decisions (reply, comment, scroll, upvote) are stateless —
+    // no conversation key means fresh context each time. The prompt already
+    // contains all feed/notifications/rate-limit context needed.
 
     const phase2 = await this.gateway.generate({
       prompt: decisionPrompt,

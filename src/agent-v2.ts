@@ -262,7 +262,7 @@ export class AgentV2 {
     console.log(`\n── Cycle ${this.cycleCount} ──`);
 
     // Rotate stale conversations to prevent hallucination loops
-    const convoKeys = ["main", "engage", "revalidate"];
+    const convoKeys = ["main", "revalidate"];
     for (const key of convoKeys) {
       if (shouldRotateConversation(key, 12 * 60 * 60 * 1000)) {
         deleteConversation(key);
