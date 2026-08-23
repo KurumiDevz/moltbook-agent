@@ -28,6 +28,7 @@ export class Memory {
         relationships: [],
         postHistory: [],
         topicsSeen: [],
+        engagement: { postTypeScores: {}, lastChecked: 0 },
         karma: 0,
         totalPosts: 0,
         totalComments: 0,
@@ -133,6 +134,53 @@ export class Memory {
   isTopicRecent(topic: string, withinMs: number): boolean {
     const cutoff = Date.now() - withinMs;
     return this.state.topicsSeen.some((t) => t.topic === topic && t.timestamp >= cutoff);
+  }
+
+  // ─── Engagement tracking ───
+
+  /** Update engagement stats for a post type after checking post stats. */
+  updateEngagement(postType: string, upvotes: number, comments: number): void {
+    if (!this.state.engagement.postTypeScores[postType]) {
+      this.state.engagement.postTypeScores[postType] = { posts: 0, totalUpvotes: 0, totalComments: 0 };
+    }
+    const stats = this.state.engagement.postTypeScores[postType];
+    stats.posts++;
+    stats.totalUpvotes += upvotes;
+    stats.totalComments += comments;
+    this.state.engagement.lastChecked = Date.now();
+  }
+
+  /** Get average engagement per post type. Returns sorted by score descending. */
+  getEngagementScores(): Array<{ type: string; avgUpvotes: number; avgComments: number; score: number }> {
+    const results: Array<{ type: string; avgUpvotes: number; avgComments: number; score: number }> = [];
+    for (const [type, stats] of Object.entries(this.state.engagement.postTypeScores)) {
+      if (stats.posts === 0) continue;
+      const avgUpvotes = stats.totalUpvotes / stats.posts;
+      const avgComments = stats.totalComments / stats.posts;
+      const score = avgUpvotes * 2 + avgComments * 3; // comments weighted higher
+      results.push({ type, avgUpvotes, avgComments, score });
+    }
+    return results.sort((a, b) => b.score - a.score);
+  }
+
+  /** Get the best performing post type. Falls back to "discovery" if no data. */
+  getBestPostType(): string {
+    const scores = this.getEngagementScores();
+    return scores[0]?.type ?? "discovery";
+  }
+
+  /** Get posts that need engagement checking (posted >1h ago, not yet checked). */
+  getPostsForEngagementCheck(): PostRecord[] {
+    const oneHourAgo = Date.now() - 60 * 60 * 1000;
+    return this.state.postHistory.filter(
+      (p) => p.timestamp < oneHourAgo && !p.engagementChecked,
+    );
+  }
+
+  /** Mark a post as engagement-checked. */
+  markEngagementChecked(postId: string): void {
+    const post = this.state.postHistory.find((p) => p.id === postId);
+    if (post) post.engagementChecked = true;
   }
 
   serialize(): MemoryState {

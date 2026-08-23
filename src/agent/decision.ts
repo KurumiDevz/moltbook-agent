@@ -1,7 +1,7 @@
 import type { Personality } from "./personality.js";
 import type { Memory } from "./memory.js";
 import type { ScoredAction } from "./types.js";
-import type { ScoredPost, InterestingAgent, Trend } from "./observer.js";
+import type { ScoredPost, InterestingAgent, Trend, NotificationSummary } from "./observer.js";
 
 const POST_COOLDOWN_MS = 30 * 60 * 1000;
 
@@ -13,6 +13,7 @@ export class DecisionEngine {
     scoredFeed: ScoredPost[],
     trends: Trend[],
     interestingAgents: InterestingAgent[],
+    options?: { recentNotifications?: NotificationSummary["recentActivity"] },
   ): ScoredAction[] {
     const actions: ScoredAction[] = [];
     const { traits, mood, ego } = personality.state;
@@ -90,6 +91,34 @@ export class DecisionEngine {
 
     // --- Scroll (always available) ---
     actions.push({ action: { type: "scroll" }, score: 5, reason: "default_explore" });
+
+    // --- Engagement check (check stats on old posts) ---
+    const uncheckedPosts = memory.getPostsForEngagementCheck();
+    if (uncheckedPosts.length > 0) {
+      actions.push({
+        action: { type: "engagement_check" },
+        score: 8 + uncheckedPosts.length * 2,
+        reason: `${uncheckedPosts.length}_posts_unchecked`,
+      });
+    }
+
+    // --- Reply to comments on own posts ---
+    const recentNotifications = options?.recentNotifications ?? [];
+    const unrepliedComments = recentNotifications.filter(
+      (n) => (n.type === "reply" || n.type === "comment") && n.postId,
+    );
+    if (unrepliedComments.length > 0 && memory.shouldComment()) {
+      const target = unrepliedComments[0];
+      let score = 30 + traits.agreeableness * 10;
+      if (mood === "engaged") score += 5;
+      const r = ["reply_to_comment"];
+      if (target.agentName) r.push(`from:${target.agentName}`);
+      actions.push({
+        action: { type: "comment", postId: target.postId!, content: "" },
+        score,
+        reason: r.join(","),
+      });
+    }
 
     // --- Rest ---
     if (recentCount > 6 || mood === "resting") {

@@ -83,6 +83,28 @@ export class Executor {
           return { success: true, action, message: `Followed ${action.agentName}`, karmaDelta: 0 };
         }
 
+        case "engagement_check": {
+          const unchecked = memory.getPostsForEngagementCheck();
+          let checked = 0;
+          for (const post of unchecked.slice(0, 5)) {
+            try {
+              const fresh = await this.agent.getPost(post.id);
+              memory.updateEngagement(post.type, fresh.post.upvotes, fresh.post.comment_count);
+              memory.markEngagementChecked(post.id);
+              checked++;
+            } catch {
+              // Post might be deleted or unavailable — mark as checked anyway
+              memory.markEngagementChecked(post.id);
+            }
+          }
+          const scores = memory.getEngagementScores();
+          const best = scores[0];
+          const msg = best
+            ? `Checked ${checked} posts. Best type: ${best.type} (${best.avgUpvotes.toFixed(1)}↑ avg)`
+            : `Checked ${checked} posts. No engagement data yet.`;
+          return { success: true, action, message: msg };
+        }
+
         case "scroll":
           return { success: true, action, message: "Scrolled feed" };
 

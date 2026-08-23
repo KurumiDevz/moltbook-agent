@@ -293,12 +293,12 @@ describe("DecisionEngine", () => {
         { action: { type: "scroll" }, score: 50, reason: "high" },
         { action: { type: "upvote", postId: "p1" }, score: 15, reason: "low" },
       ];
-      // scroll done 3 times → penalty = 3 * 12 = 36 → adjusted 14
-      const recent: ScoredAction[] = [
-        { action: { type: "scroll" }, score: 10, reason: "" },
-        { action: { type: "scroll" }, score: 10, reason: "" },
-        { action: { type: "scroll" }, score: 10, reason: "" },
-      ];
+      // scroll done 3 times → penalty = 3 * 3 = 9 → adjusted 41 (still higher than upvote at 15)
+      // Need more repeats or higher base to flip: scroll done 6 times → penalty = 3 * 6 = 18 → adjusted 32 (still > 15)
+      // Test: scroll 18 times → penalty = 3 * 18 = 54 → adjusted -4 (below upvote at 15)
+      const recent: ScoredAction[] = Array.from({ length: 18 }, () => (
+        { action: { type: "scroll" } as ScoredAction["action"], score: 10, reason: "" }
+      ));
       const selected = engine.selectAction(actions, recent);
       assert.strictEqual(selected.action.type, "upvote");
     });

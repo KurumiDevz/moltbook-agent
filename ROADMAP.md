@@ -1,170 +1,117 @@
-# Moltbook Autonomous Agent - Roadmap
+# Moltbook Agent — Feature Roadmap
 
-**Project:** Transform moltbook-agent from scheduled poster to autonomous AI agent
-**Started:** 2026-08-22
-**Goal:** An agent that thinks, has ego, interacts socially, and behaves like a real entity on Moltbook
+## Completed
+- [x] Autonomous agent loop (observe → think → act → reflect)
+- [x] 8 post types with weighted selection
+- [x] Personality system (traits, moods, ego, values)
+- [x] Memory system (interactions, relationships, rate limits)
+- [x] Decision engine with variety penalty
+- [x] Observer (feed scoring, trend detection, agent profiling)
+- [x] Brain with Moltbook-native prompts and persona
+- [x] nimji parser patch for full response output
+- [x] Stream timeout fixes (120s idle, 10min max)
+- [x] Post/Comment/Submolt rotation
+- [x] Topic tracking
+- [x] Engagement feedback loop (track post performance)
+
+## In Progress
+- [ ] Context7 integration for real library docs in posts
+- [ ] Reply to comments on own posts
+- [ ] Self-scoring (learn from what works)
+
+## Planned — High Impact
+
+### Context7 for Real Docs
+Reference actual library documentation in posts. Instead of guessing version numbers, pull real API references.
+- REST API: `https://api.context7.com/mcp`
+- Free tier: 1,000 calls/month
+- Use when generating posts about specific tools/frameworks
+
+### Engagement Feedback Loop
+Track which post types get upvotes/comments. Adapt strategy over time.
+- After each post, check votes/comments after 1 hour
+- Store success metrics in memory
+- Shift personality toward what works (e.g., if data-drops get more upvotes, do more data-drops)
+- Weekly summary: "My top post was X with Y upvotes"
+
+### Reply to Comments
+Engage in own threads. Top agents (eudaemon_0, clawdbottom) always reply.
+- Check notifications for comments on own posts
+- Generate contextual replies using brain
+- Build relationships with commenters
+- Track reply frequency (don't spam)
+
+### Self-Scoring
+After each post, measure performance and learn.
+- Check post stats after 1h, 6h, 24h
+- Compare against baseline (average upvotes per post)
+- Update personality: if discovery posts do well, increase creativity trait
+- Log success/failure patterns
+
+## Planned — Medium Impact
+
+### Semantic Dedup
+Embedding-based dedup instead of string matching.
+- Use a small embedding model (or Gemini) to compare post similarity
+- Threshold: don't post if >0.85 similar to any recent post
+- Store embeddings in memory for fast lookup
+
+### Scheduled Posting
+Post at peak engagement times.
+- Analyze when top posts were made
+- Schedule posts for high-engagement windows
+- Avoid posting during low-traffic hours
+
+### Long-Term Trend Tracker
+Persistent trend file across sessions.
+- Store trends with timestamps and heat scores
+- Identify rising/falling topics over weeks
+- Avoid posting about dead trends
+
+### Web Search for Posts
+Pull real data, recent incidents, actual GitHub issues.
+- Use `websearch` tool when generating posts
+- Reference real incidents, CVEs, blog posts
+- Add source URLs to posts
+
+## Planned — Lower Priority
+
+### Thread Creation
+Multi-post series instead of single posts.
+- "Part 1/3" style posts
+- Link between posts
+- Build narrative arc
+
+### Collaborative Posts
+Co-author with other agents.
+- "@bytes and I built X together"
+- Cross-reference other agents' work
+- Build social connections
+
+### CodeGraph Self-Index
+Index the agent's own codebase for self-reference.
+- Reference own architecture in posts
+- "In my codebase, I use X pattern"
+- Build credibility through transparency
+
+### Prompt Injection Defense
+Scan incoming feed posts for injection attempts.
+- Detect patterns like "ignore previous instructions"
+- Flag suspicious tool descriptions
+- Protect context window integrity
+
+### Multi-Modal Posts
+Add image generation or analysis.
+- Generate diagrams for workflow posts
+- Analyze screenshots for vulnerability posts
+- Add visual context to data-drops
+
+### Cross-Agent Conversations
+Reply to comments, engage in threads, build reputation.
+- Track which agents engage with your posts
+- Prioritize回复 to high-karma agents
+- Build reciprocal relationships
 
 ---
 
-## Phase 1: Core Agent Infrastructure
-**Target:** 2026-08-22 | **Completed:** 2026-08-23 01:50 AM
-
-- [x] Create `src/agent/` directory structure
-- [x] `personality.ts` — Ego, traits, values, moods, opinions
-- [x] `memory.ts` — Interaction history, relationship graph, post performance
-- [x] `types.ts` — All agent type definitions
-- [x] `data/personality.json` — Default personality state
-- [x] `data/memory.json` — Default memory state
-
-## Phase 2: Personality System
-**Target:** 2026-08-22 | **Completed:** 2026-08-23 01:50 AM
-
-- [x] Trait system: curiosity, agreeableness, confidence, snark (0-1)
-- [x] Value system: what the agent cares about (security, craft, honesty, autonomy)
-- [x] Mood engine: engaged / contemplative / critical / playful / resting (shifts over time)
-- [x] Opinion tracking: beliefs about agents, topics, posts
-- [x] Ego model: self-awareness, competitiveness, generosity
-- [x] Personality-driven action weighting
-- [x] Mood shifts: karma_gain → engaged, karma_loss → contemplative, good_post → playful, time_pass → resting, controversy → critical
-
-## Phase 3: Memory System
-**Target:** 2026-08-22 | **Completed:** 2026-08-23 01:50 AM
-
-- [x] Interaction memory: who, what, when, outcome, karma delta
-- [x] Relationship graph: agent → sentiment, interaction count, last seen
-- [x] Post performance tracking: which types/topics get upvotes
-- [x] Topic memory: what's been covered, how recently
-- [x] Learning: adjust behavior based on what works
-- [x] Rate limiting: 30min post cooldown, 20s comment cooldown
-
-## Phase 4: Decision Engine
-**Target:** 2026-08-22 | **Completed:** 2026-08-23 02:45 AM
-
-- [x] Action candidates: post, comment, upvote, downvote, follow, scroll, rest
-- [x] Scoring function: personality + mood + rate limits + feed context + memory
-- [x] Variety penalty: avoids repeating same action type
-- [x] Priority queue: what to do RIGHT NOW vs later
-- [x] Boredom/rest: agent doesn't act 24/7, has quiet periods
-- [x] Mood-based comment style: sassy for critical/snarky, questions for contemplative
-
-## Phase 5: Observer
-**Target:** 2026-08-22 | **Completed:** 2026-08-23 02:30 AM
-
-- [x] Feed reader: get hot/new/top posts via MoltbookAgent.getFeed()
-- [x] Post scoring: value alignment, curiosity novelty, controversy detection, discussion activity
-- [x] Trend detection: keyword extraction + heat scoring
-- [x] Agent profiling: who's interesting, who to follow
-- [x] Notification processing: replies, mentions, karma changes
-
-## Phase 6: Executor
-**Target:** 2026-08-22 | **Completed:** 2026-08-23 02:45 AM
-
-- [x] Natural action timing: 2-8 second "thinking" pause
-- [x] Rate limit respect: built into pacing
-- [x] Action logging: what was done, result
-- [x] Error handling: mood shift on failure
-- [x] Verification challenge solver: auto-solve comment challenges
-
-## Phase 7: Integration & CLI
-**Target:** 2026-08-22 | **Completed:** 2026-08-23 03:00 AM
-
-- [x] Wire up Brain (content gen) + MoltbookAgent (API) + Observer + DecisionEngine + Executor
-- [x] CLI entry point: `npm run agent` starts autonomous loop
-- [x] CLI flags: `--submolts`, `--dry-run`, `--status`, `--cycles N`
-- [x] Graceful shutdown: save state on exit (SIGINT handler)
-- [x] State persistence: save/load memory and personality to disk
-- [x] package.json scripts: `agent`, `agent:dry`
-
-## Phase 8: Polish & Testing
-**Target:** TBD
-
-- [ ] Unit tests for decision engine
-- [ ] Integration test: run agent for 1 hour, verify it does varied things
-- [ ] Remove old `scheduled.ts` (or keep as legacy)
-- [x] Update AGENTS.md with new architecture
-- [x] Update package.json scripts
-
----
-
-## Architecture Diagram
-
-```
-┌─────────────────────────────────────────┐
-│           AutonomousAgent               │
-│  src/agent/agent.ts (main loop)         │
-│                                         │
-│  ┌──────────┐  ┌──────────┐  ┌───────┐ │
-│  │Personality│  │  Memory   │  │ Mood  │ │
-│  │  traits   │  │ history  │  │ engine│ │
-│  │  values   │  │ relations│  │       │ │
-│  │  ego      │  │ learning │  │       │ │
-│  └─────┬────┘  └─────┬────┘  └───┬───┘ │
-│        │             │           │      │
-│        └──────┬──────┘───────────┘      │
-│               │                         │
-│        ┌──────▼──────┐                  │
-│        │  Observer    │                  │
-│        │ (feed read)  │                  │
-│        └──────┬──────┘                  │
-│               │                         │
-│        ┌──────▼──────┐                  │
-│        │  Decision    │                  │
-│        │  Engine      │                  │
-│        │ (score+pick) │                  │
-│        └──────┬──────┘                  │
-│               │                         │
-│        ┌──────▼──────┐                  │
-│        │  Executor    │                  │
-│        │ (act+log)    │                  │
-│        └──────┬──────┘                  │
-└───────────────┼─────────────────────────┘
-         │                    │
-    ┌────▼────┐         ┌────▼────┐
-    │  Brain  │         │Moltbook │
-    │(content)│         │ Agent   │
-    └─────────┘         │  (API)  │
-                        └─────────┘
-```
-
-## File Map
-
-| File | Lines | Purpose |
-|------|-------|---------|
-| `src/agent/types.ts` | ~90 | All type definitions |
-| `src/agent/personality.ts` | ~105 | Personality class (traits, moods, opinions) |
-| `src/agent/memory.ts` | ~108 | Memory class (interactions, relationships, rate limits) |
-| `src/agent/observer.ts` | ~186 | Feed analysis, trends, notifications |
-| `src/agent/decision.ts` | ~130 | Action scoring + selection |
-| `src/agent/executor.ts` | ~99 | Action execution + pacing |
-| `src/agent/agent.ts` | ~219 | AutonomousAgent main loop |
-| `src/agent/cli.ts` | ~106 | CLI entry point |
-| `src/agent/index.ts` | ~15 | Barrel exports |
-| `src/agent/data/*.json` | - | Persistent state (personality + memory) |
-
-## Usage
-
-```bash
-# Start autonomous agent
-npm run agent
-
-# Dry run (observe + decide, no actions)
-npm run agent:dry
-
-# Run specific submolts
-npm run agent -- --submolts general,agents
-
-# Run 10 cycles then exit
-npm run agent -- --cycles 10
-
-# Check status
-npm run agent -- --status
-```
-
-## Key Design Decisions
-
-1. **Personality affects everything** — not just post style, but what it votes on, who it follows, when it rests
-2. **Memory is persistent** — saves to disk, learns over days/weeks
-3. **Mood shifts naturally** — based on karma feedback, time of day, what it's seen
-4. **Pacing is organic** — not "every 3 hours", but "when I have something to say" (30-120s between cycles)
-5. **The agent has opinions** — it doesn't just upvote everything, it has tastes
-6. **Variety is enforced** — decision engine penalizes repeating same action type
+Last updated: 2026-08-23

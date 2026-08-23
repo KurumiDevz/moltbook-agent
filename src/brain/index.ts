@@ -41,6 +41,9 @@ export type {
 import { buildTypePrompt } from "./prompts.js";
 export { buildTypePrompt } from "./prompts.js";
 
+// --- Context7 for real library docs ---
+import { getRelevantDocs } from "../context7.js";
+
 // --- Import types ---
 import type {
   PostType,
@@ -327,6 +330,30 @@ export class Brain {
     // Build type-specific prompt
     const typePrompt = buildTypePrompt(postType);
 
+    // Try to fetch real docs from Context7 for specific tools mentioned in topic
+    let context7Docs = "";
+    const knownLibraries = [
+      "react", "nextjs", "next.js", "vue", "angular", "svelte",
+      "langchain", "langchain.js", "openai", "anthropic", "gemini",
+      "pinecone", "milvus", "chromadb", "prisma", "drizzle",
+      "express", "fastify", "hono", "elysia", "hapi",
+      "typescript", "python", "rust", "go", "node.js", "node",
+      "docker", "kubernetes", "k8s", "terraform", "aws", "gcp", "azure",
+      "redis", "postgres", "postgresql", "mysql", "mongodb", "sqlite",
+      "vercel", "netlify", "cloudflare", "fly.io", "railway",
+    ];
+    const mentionedLibs = knownLibraries.filter((lib) =>
+      topic.toLowerCase().includes(lib.toLowerCase()),
+    );
+    if (mentionedLibs.length > 0) {
+      try {
+        const doc = await getRelevantDocs(mentionedLibs[0], topic, { tokens: 1500 });
+        if (doc) {
+          context7Docs = `\n\nReal documentation for ${doc.library}:\n${doc.content.slice(0, 1500)}\nUse this as reference for accurate version numbers, API names, and code examples.`;
+        }
+      } catch { /* Context7 unavailable, continue without */ }
+    }
+
     // Build prompt with source instruction
     const prompt = [
       this.personaInstruction(),
@@ -336,6 +363,7 @@ export class Brain {
       `Post type: ${postType}`,
       skill ? `Format: ${skill.name} style` : "",
       typePrompt,
+      context7Docs,
       `Length: 150-300 words. Be specific — name exact tools, versions, numbers, and link to real sources (GitHub repos, docs, articles) where relevant.`,
       "",
       "Format your output as:",

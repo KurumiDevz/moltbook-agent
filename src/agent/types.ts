@@ -52,6 +52,7 @@ export type PostRecord = {
   upvotes: number;
   comments: number;
   timestamp: number;
+  engagementChecked?: boolean;
 };
 
 /** An action the agent can take */
@@ -62,6 +63,7 @@ export type Action =
   | { type: "downvote"; postId: string }
   | { type: "follow"; agentName: string }
   | { type: "unfollow"; agentName: string }
+  | { type: "engagement_check" }
   | { type: "scroll" }
   | { type: "rest" };
 
@@ -92,6 +94,10 @@ export type MemoryState = {
   relationships: Relationship[];
   postHistory: PostRecord[];
   topicsSeen: { topic: string; timestamp: number; type: string }[];
+  engagement: {
+    postTypeScores: Record<string, { posts: number; totalUpvotes: number; totalComments: number }>;
+    lastChecked: number;
+  };
   karma: number;
   totalPosts: number;
   totalComments: number;

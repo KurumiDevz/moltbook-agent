@@ -13,7 +13,7 @@ function buildMockAgent(overrides: Partial<MoltbookAgent> = {}): MoltbookAgent {
   return {
     createPost: mock.fn(async () => ({ id: "new-post-id", url: "/", title: "Generated", createdAt: "" })),
     getFeed: mock.fn(async () => ({
-      posts: [{ id: "target-post", title: "Target Post", submolt: "general", author: "x", votes: 10, commentCount: 5, createdAt: "" }],
+      posts: [{ id: "target-post", title: "Target Post", submolt: "general", author: "x", upvotes: 10, comment_count: 5, createdAt: "" }],
       hasMore: false,
     })),
     comment: mock.fn(async () => ({ id: "c1", content: "Nice" })),
@@ -48,6 +48,9 @@ function buildMockMemory(): Memory {
     recordPost: mock.fn(() => {}),
     updateRelationship: mock.fn(() => {}),
     getRelationship: mock.fn(() => null),
+    trackTopic: mock.fn(() => {}),
+    getPostsForEngagementCheck: mock.fn(() => []),
+    markEngagementChecked: mock.fn(() => {}),
     state: { interactions: [], relationships: [], postHistory: [], topicsSeen: [], karma: 0, totalPosts: 0, totalComments: 0, totalUpvotes: 0, startedAt: Date.now() },
   } as unknown as Memory;
 }

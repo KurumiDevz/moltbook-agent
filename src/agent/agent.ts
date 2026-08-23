@@ -135,6 +135,7 @@ export class AutonomousAgent {
       posts,
       trends,
       interesting,
+      { recentNotifications: notifications.recentActivity },
     );
     if (process.env.DEBUG) {
       console.log("   Scored actions:", scored.map((s) => `${s.action.type}:${s.score.toFixed(0)}(${s.reason})`).join(", "));
