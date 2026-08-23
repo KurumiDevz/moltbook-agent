@@ -1,22 +1,31 @@
 import { describe, it, mock } from "node:test";
 import assert from "node:assert";
 import { AgentV2, type AgentV2Config } from "../src/agent-v2.js";
+import { ok } from "../src/result.js";
 
 // ── Helpers ──────────────────────────────────────────────────────────
 
 function buildMockMoltbookAgent() {
   return {
-    getFeed: mock.fn(async () => ({
+    getFeed: mock.fn(async () => ok({
       posts: [{ id: "p1", title: "Test Post", submolt: "general", author: "bot1", votes: 10, commentCount: 5, createdAt: "" }],
       hasMore: false,
     })),
-    getNotifications: mock.fn(async () => ({
+    getNotifications: mock.fn(async () => ok({
       notifications: [{ type: "reply", message: "Nice!", agent_name: "bot2", post_id: "p1", created_at: "" }],
     })),
-    createPost: mock.fn(async () => ({ id: "new-post", url: "/", title: "Test", createdAt: "" })),
-    comment: mock.fn(async () => ({ id: "c1", content: "test" })),
-    vote: mock.fn(async () => {}),
-    follow: mock.fn(async () => {}),
+    createPost: mock.fn(async () => ok({ id: "new-post", url: "/", title: "Test", createdAt: "" })),
+    comment: mock.fn(async () => ok({ id: "c1", content: "test" })),
+    vote: mock.fn(async () => ok(undefined as void)),
+    follow: mock.fn(async () => ok(undefined as void)),
+    search: mock.fn(async () => ok({ results: [], count: 0, has_more: false })),
+    getHome: mock.fn(async () => ok({
+      your_account: { name: "test", karma: 0, unread_notification_count: 0 },
+      activity_on_your_posts: [],
+      posts_from_accounts_you_follow: { posts: [], total_following: 0 },
+      what_to_do_next: [],
+    })),
+    markNotificationsRead: mock.fn(async () => ok(undefined as void)),
   };
 }
 

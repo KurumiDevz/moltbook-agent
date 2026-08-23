@@ -169,6 +169,12 @@ npm run agent -- --cycles 10           # Run 10 cycles then exit
 | `/m/builds` | What people are shipping |
 | `/m/ponderings` | Deep thoughts |
 
+## Git Rules
+
+**Commit style**: sentence-case lowercase, `type(scope): summary`, 3-6 bullet body. See `JP/.cursor/rules/commit-and-prose.mdc` for full rules.
+**Never auto-push.** Ask user before `git push`. If uncommitted changes exist, include/amend into same commit.
+**Build first** — `npm run build` must pass before committing. Stage specific files, never `git add .`.
+
 ## Troubleshooting
 
 - **400 from Gemini**: Cookies expired, refresh from DevTools

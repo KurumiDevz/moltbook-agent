@@ -3,12 +3,7 @@
  * Routes requests to the appropriate provider based on model name or explicit provider selection.
  */
 
-import type {
-  GenerateRequest,
-  GenerateResponse,
-  Provider,
-  ProviderType,
-} from "./provider.js";
+import type { GenerateRequest, GenerateResponse, Provider, ProviderType } from "./provider.js";
 
 export type GatewayConfig = {
   /** Default provider to use when not specified */
@@ -46,10 +41,7 @@ export class Gateway {
   /**
    * Initialize a specific provider or all registered providers.
    */
-  async initializeProvider(
-    type: ProviderType,
-    config: Parameters<Provider["initialize"]>[0]
-  ): Promise<void> {
+  async initializeProvider(type: ProviderType, config: Parameters<Provider["initialize"]>[0]): Promise<void> {
     const provider = this.providers.get(type);
     if (!provider) {
       throw new Error(`Provider "${type}" not registered. Available: ${this.getAvailableProviders().join(", ")}`);
@@ -62,12 +54,10 @@ export class Gateway {
   /**
    * Initialize all registered providers with their configs.
    */
-  async initializeAll(
-    configs: Record<ProviderType, Parameters<Provider["initialize"]>[0]>
-  ): Promise<void> {
+  async initializeAll(configs: Record<ProviderType, Parameters<Provider["initialize"]>[0]>): Promise<void> {
     const promises: Promise<void>[] = [];
 
-    for (const [type, provider] of this.providers) {
+    for (const [type] of this.providers) {
       const config = configs[type];
       if (config) {
         promises.push(this.initializeProvider(type, config));
@@ -80,10 +70,7 @@ export class Gateway {
   /**
    * Generate a response using the specified or default provider.
    */
-  async generate(
-    request: GenerateRequest,
-    providerType?: ProviderType
-  ): Promise<GenerateResponse> {
+  async generate(request: GenerateRequest, providerType?: ProviderType): Promise<GenerateResponse> {
     const targetProvider = providerType ?? this.resolveProvider(request);
 
     // Try primary provider
@@ -110,10 +97,7 @@ export class Gateway {
   /**
    * Generate using a specific provider with timeout.
    */
-  private async generateWithProvider(
-    type: ProviderType,
-    request: GenerateRequest
-  ): Promise<GenerateResponse> {
+  private async generateWithProvider(type: ProviderType, request: GenerateRequest): Promise<GenerateResponse> {
     const provider = this.providers.get(type);
     if (!provider) {
       throw new Error(`Provider "${type}" not registered`);
@@ -128,7 +112,7 @@ export class Gateway {
     return Promise.race([
       provider.generate(request),
       new Promise<never>((_, reject) =>
-        setTimeout(() => reject(new Error(`Provider "${type}" timeout after ${timeout}ms`)), timeout)
+        setTimeout(() => reject(new Error(`Provider "${type}" timeout after ${timeout}ms`)), timeout),
       ),
     ]);
   }
@@ -139,10 +123,12 @@ export class Gateway {
   private resolveProvider(request: GenerateRequest): ProviderType {
     // If model is specified, try to find a provider that supports it
     if (request.model) {
-      for (const [type, provider] of this.providers) {
+      for (const [type] of this.providers) {
         if (!this.initialized.has(type)) continue;
 
-        const caps = provider.getCapabilities();
+        const providerInstance = this.providers.get(type);
+        if (!providerInstance) continue;
+        const caps = providerInstance.getCapabilities();
         if (caps.supportedModels.includes(request.model)) {
           return type;
         }
@@ -191,7 +177,7 @@ export class Gateway {
       checks.push(
         provider.healthCheck().then((healthy) => {
           results[type] = healthy;
-        })
+        }),
       );
     }
 

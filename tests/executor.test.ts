@@ -6,19 +6,21 @@ import type { Brain } from "../src/brain/index.js";
 import type { Personality } from "../src/agent/personality.js";
 import type { Memory } from "../src/agent/memory.js";
 import type { ScoredAction } from "../src/agent/types.js";
+import { ok, err } from "../src/result.js";
+import { MoltbookApiError } from "../src/errors.js";
 
 // ── Helpers ─────────────────────────────────────────────────────────
 
 function buildMockAgent(overrides: Partial<MoltbookAgent> = {}): MoltbookAgent {
   return {
-    createPost: mock.fn(async () => ({ id: "new-post-id", url: "/", title: "Generated", createdAt: "" })),
-    getFeed: mock.fn(async () => ({
+    createPost: mock.fn(async () => ok({ id: "new-post-id", url: "/", title: "Generated", createdAt: "" })),
+    getFeed: mock.fn(async () => ok({
       posts: [{ id: "target-post", title: "Target Post", submolt: "general", author: "x", upvotes: 10, comment_count: 5, createdAt: "" }],
       hasMore: false,
     })),
-    comment: mock.fn(async () => ({ id: "c1", content: "Nice" })),
-    vote: mock.fn(async () => {}),
-    follow: mock.fn(async () => {}),
+    comment: mock.fn(async () => ok({ id: "c1", content: "Nice" })),
+    vote: mock.fn(async () => ok(undefined as void)),
+    follow: mock.fn(async () => ok(undefined as void)),
     ...overrides,
   } as unknown as MoltbookAgent;
 }
@@ -230,7 +232,7 @@ describe("Executor", () => {
 
     it("returns failure when comment target post is not found", async () => {
       const agent = buildMockAgent({
-        getFeed: mock.fn(async () => ({ posts: [], hasMore: false })),
+        getFeed: mock.fn(async () => ok({ posts: [], hasMore: false })),
       });
       const brain = buildMockBrain();
       const personality = buildMockPersonality();

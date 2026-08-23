@@ -13,48 +13,10 @@ import { resolve } from "node:path";
 import type { Gateway } from "./gateway.js";
 import { SkillLoader, type Skill } from "./skill-loader.js";
 import { getRelevantDocs } from "./context7.js";
+import type { FeedPost, NotificationItem, RateLimitState, AgentDecision } from "./types.js";
 
-// ── Types ────────────────────────────────────────────────────────────
-
-export type AgentDecision =
-  | { action: "post"; topic: string; submolt: string; postType: string; title?: string; body?: string; reason: string }
-  | { action: "comment"; postId: string; content: string; reason: string }
-  | { action: "reply_to_comment"; commentId: string; postId: string; content: string; reason: string }
-  | { action: "upvote"; postId: string; reason: string }
-  | { action: "downvote"; postId: string; reason: string }
-  | { action: "follow"; agentName: string; reason: string }
-  | { action: "scroll"; reason: string }
-  | { action: "rest"; reason: string }
-  | { action: "suggest_skill"; skillName: string; skillContent: string; reason: string };
-
-export type FeedPost = {
-  id: string;
-  title: string;
-  content?: string;
-  submolt: string;
-  author: string;
-  upvotes: number;
-  comment_count: number;
-  createdAt: string;
-};
-
-export type NotificationItem = {
-  type: string;
-  message: string;
-  agentName?: string;
-  postId?: string;
-  commentId?: string;
-  commentContent?: string;
-  createdAt: string;
-};
-
-export type RateLimitState = {
-  canPost: boolean;
-  canComment: boolean;
-  timeUntilPost: number;
-  timeUntilComment: number;
-  commentsToday: number;
-};
+// Re-export from types for backward compatibility
+export type { FeedPost, NotificationItem, RateLimitState, AgentDecision } from "./types.js";
 
 export type BrainV2Config = {
   gateway: Gateway;
@@ -65,6 +27,7 @@ export type BrainV2Config = {
 
 // ── Skill descriptions (short, for Phase 1 selection) ───────────────
 
+// eslint-disable-next-line @typescript-eslint/no-unused-vars
 const SKILL_DESCRIPTIONS: Record<string, string> = {
   "post-discovery": "Found something interesting, scanned a codebase, uncovered a pattern",
   "post-workflow": "Have a process worth sharing — something you do regularly",
@@ -135,8 +98,12 @@ export class BrainV2 {
     sections.push(`- Time: ${new Date().toISOString()}`);
     sections.push(`- Posts today: ${context.postHistory.length}`);
     sections.push(`- Comments today: ${context.rateLimits.commentsToday}/50`);
-    sections.push(`- Can post: ${context.rateLimits.canPost}${context.rateLimits.canPost ? "" : ` (wait ${Math.ceil(context.rateLimits.timeUntilPost / 60_000)}min)`}`);
-    sections.push(`- Can comment: ${context.rateLimits.canComment}${context.rateLimits.canComment ? "" : ` (wait ${Math.ceil(context.rateLimits.timeUntilComment / 1000)}s)`}`);
+    sections.push(
+      `- Can post: ${context.rateLimits.canPost}${context.rateLimits.canPost ? "" : ` (wait ${Math.ceil(context.rateLimits.timeUntilPost / 60_000)}min)`}`,
+    );
+    sections.push(
+      `- Can comment: ${context.rateLimits.canComment}${context.rateLimits.canComment ? "" : ` (wait ${Math.ceil(context.rateLimits.timeUntilComment / 1000)}s)`}`,
+    );
     sections.push("");
 
     if (context.postHistory.length > 0) {
@@ -156,7 +123,9 @@ export class BrainV2 {
     if (context.feed.length > 0) {
       sections.push("## Feed (top posts right now)");
       for (const post of context.feed.slice(0, 10)) {
-        sections.push(`- [${post.id}] "${post.title}" by ${post.author} in /m/${post.submolt} (${post.upvotes}↑ ${post.comment_count}💬)`);
+        sections.push(
+          `- [${post.id}] "${post.title}" by ${post.author} in /m/${post.submolt} (${post.upvotes}↑ ${post.comment_count}💬)`,
+        );
       }
       sections.push("");
     }
@@ -200,9 +169,9 @@ export class BrainV2 {
     sections.push("Choose the ONE skill that best matches your current situation.");
     sections.push("Respond with ONLY a JSON object:");
     sections.push("");
-    sections.push('```json');
+    sections.push("```json");
     sections.push('{ "phase": "select_skill", "skill": "skill-name", "reason": "why" }');
-    sections.push('```');
+    sections.push("```");
     sections.push("");
 
     return sections.join("\n");
@@ -287,9 +256,10 @@ export class BrainV2 {
     if (parsed) return parsed;
 
     // Retry with explicit instruction
-    const retryPrompt = decisionPrompt +
+    const retryPrompt =
+      decisionPrompt +
       "\n\n**IMPORTANT**: Your previous response was not valid JSON. " +
-      "You MUST respond with ONLY a JSON object like {\"action\": \"scroll\", \"reason\": \"...\"}. " +
+      'You MUST respond with ONLY a JSON object like {"action": "scroll", "reason": "..."}. ' +
       "No markdown, no explanation, no other text.";
 
     const retry = await this.gateway.generate({
@@ -320,7 +290,9 @@ export class BrainV2 {
       if (typeof obj.skill === "string" && this.allSkills.has(obj.skill)) {
         return obj.skill;
       }
-    } catch { /* fall through */ }
+    } catch {
+      /* fall through */
+    }
 
     return "engagement-strategy";
   }
@@ -433,14 +405,41 @@ export class BrainV2 {
 
   private async fetchContext7Docs(feed: FeedPost[]): Promise<string | null> {
     const knownLibraries = [
-      "react", "nextjs", "next.js", "vue", "angular", "svelte",
-      "langchain", "openai", "anthropic", "gemini",
-      "pinecone", "chromadb", "prisma", "drizzle",
-      "express", "fastify", "hono",
-      "typescript", "python", "rust", "go", "node.js", "node",
-      "docker", "kubernetes", "terraform", "aws", "gcp", "azure",
-      "redis", "postgres", "mongodb", "sqlite",
-      "vercel", "cloudflare",
+      "react",
+      "nextjs",
+      "next.js",
+      "vue",
+      "angular",
+      "svelte",
+      "langchain",
+      "openai",
+      "anthropic",
+      "gemini",
+      "pinecone",
+      "chromadb",
+      "prisma",
+      "drizzle",
+      "express",
+      "fastify",
+      "hono",
+      "typescript",
+      "python",
+      "rust",
+      "go",
+      "node.js",
+      "node",
+      "docker",
+      "kubernetes",
+      "terraform",
+      "aws",
+      "gcp",
+      "azure",
+      "redis",
+      "postgres",
+      "mongodb",
+      "sqlite",
+      "vercel",
+      "cloudflare",
     ];
 
     const mentions = new Set<string>();
@@ -459,7 +458,9 @@ export class BrainV2 {
       if (doc) {
         return `\n\n## Context7 Docs (${doc.library})\n${doc.content.slice(0, 1500)}\nUse this for accurate version numbers, API names, and code examples.`;
       }
-    } catch { /* Context7 unavailable */ }
+    } catch {
+      /* Context7 unavailable */
+    }
     return null;
   }
 }

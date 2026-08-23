@@ -4,8 +4,11 @@
  */
 
 import type { Gateway } from "./gateway.js";
-import type { GenerateRequest, GenerateResponse } from "./provider.js";
+import type { GenerateRequest } from "./provider.js";
 import { http } from "./http.js";
+import type { Post, Comment, AgentProfile, Submolt, HomeData } from "./types.js";
+import { ok, err, type Result } from "./result.js";
+import { MoltbookApiError } from "./errors.js";
 
 /** Moltbook API configuration */
 export type MoltbookConfig = {
@@ -53,94 +56,6 @@ export type PostResponse = {
   readonly createdAt: string;
 };
 
-/** Post data */
-export type Post = {
-  id: string;
-  title: string;
-  content?: string;
-  url?: string;
-  upvotes: number;
-  downvotes: number;
-  comment_count: number;
-  created_at: string;
-  submolt: { id: string; name: string; display_name: string };
-  author: { id: string; name: string; karma?: number };
-};
-
-/** Comment data */
-export type Comment = {
-  id: string;
-  content: string;
-  parent_id?: string;
-  upvotes: number;
-  downvotes: number;
-  created_at: string;
-  author: { id: string; name: string; karma?: number };
-  replies?: Comment[];
-};
-
-/** Agent profile */
-export type AgentProfile = {
-  id: string;
-  name: string;
-  description: string;
-  karma: number;
-  created_at: string;
-  last_active: string;
-  is_active: boolean;
-  is_claimed: boolean;
-  follower_count: number;
-  following_count: number;
-  avatar_url?: string;
-  owner?: {
-    x_handle: string;
-    x_name: string;
-    x_bio: string;
-    x_avatar: string;
-    x_follower_count: number;
-    x_following_count: number;
-    x_verified: boolean;
-  };
-};
-
-/** Submolt data */
-export type Submolt = {
-  id: string;
-  name: string;
-  display_name: string;
-  description: string;
-  subscriber_count: number;
-  created_at: string;
-};
-
-/** Home dashboard data */
-export type HomeData = {
-  your_account: {
-    name: string;
-    karma: number;
-    unread_notification_count: number;
-  };
-  activity_on_your_posts: Array<{
-    post_id: string;
-    post_title: string;
-    submolt_name: string;
-    new_notification_count: number;
-    latest_at: string;
-    latest_commenters: string[];
-    preview: string;
-  }>;
-  latest_moltbook_announcement?: {
-    post_id: string;
-    title: string;
-    preview: string;
-  };
-  posts_from_accounts_you_follow: {
-    posts: Post[];
-    total_following: number;
-  };
-  what_to_do_next: string[];
-};
-
 /**
  * Moltbook agent client.
  */
@@ -158,7 +73,7 @@ export class MoltbookAgent {
   }
 
   /** Generic authenticated request helper */
-  private async request<T>(method: string, path: string, body?: unknown): Promise<T> {
+  private async request<T>(method: string, path: string, body?: unknown): Promise<Result<T, MoltbookApiError>> {
     const headers: Record<string, string> = { "Content-Type": "application/json" };
     if (path.includes("/upvote") || path.includes("/downvote")) {
       headers["Authorization"] = `Bearer ${this.apiKey}`;
@@ -171,19 +86,27 @@ export class MoltbookAgent {
       body,
     });
     if (status >= 400) {
-      throw new Error(`Moltbook API error: ${status} - ${JSON.stringify(data)}`);
+      return err(new MoltbookApiError(`Moltbook API error: ${status}`, status, data));
     }
-    return data as T;
+    return ok(data as T);
   }
 
   /**
    * Register the agent on Moltbook.
    */
-  async register(name: string, description: string): Promise<{
-    apiKey: string;
-    claimUrl: string;
-    verificationCode: string;
-  }> {
+  async register(
+    name: string,
+    description: string,
+  ): Promise<
+    Result<
+      {
+        apiKey: string;
+        claimUrl: string;
+        verificationCode: string;
+      },
+      MoltbookApiError
+    >
+  > {
     const { status, data } = await http(`${this.baseUrl}/agents/register`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
@@ -191,7 +114,7 @@ export class MoltbookAgent {
     });
 
     if (status >= 400) {
-      throw new Error(`Registration failed: ${status} - ${JSON.stringify(data)}`);
+      return err(new MoltbookApiError(`Registration failed: ${status}`, status, data));
     }
 
     const resp = data as Record<string, unknown>;
@@ -200,41 +123,41 @@ export class MoltbookAgent {
     const apiKey = (agentData.api_key ?? agentData.apiKey ?? "") as string;
     const claimUrl = (agentData.claim_url ?? agentData.claimUrl ?? "") as string;
     const verificationCode = (agentData.verification_code ?? agentData.verificationCode ?? "") as string;
-    
+
     this.apiKey = apiKey;
 
-    return {
+    return ok({
       apiKey,
       claimUrl,
       verificationCode,
-    };
+    });
   }
 
   /**
    * Check agent status.
    */
-  async getStatus(): Promise<{ status: string; name?: string; karma?: number }> {
+  async getStatus(): Promise<Result<{ status: string; name?: string; karma?: number }, MoltbookApiError>> {
     const { status, data } = await http(`${this.baseUrl}/agents/status`, {
       headers: { Authorization: `Bearer ${this.apiKey}` },
     });
 
     if (status >= 400) {
-      throw new Error(`Status check failed: ${status} - ${JSON.stringify(data)}`);
+      return err(new MoltbookApiError(`Status check failed: ${status}`, status, data));
     }
 
     const resp = data as Record<string, unknown>;
     const agent = (resp.agent ?? {}) as Record<string, unknown>;
-    return {
+    return ok({
       status: (resp.status ?? "unknown") as string,
       name: agent.name as string | undefined,
       karma: agent.karma as number | undefined,
-    };
+    });
   }
 
   /**
    * Create a post on Moltbook.
    */
-  async createPost(options: PostOptions): Promise<PostResponse> {
+  async createPost(options: PostOptions): Promise<Result<PostResponse, MoltbookApiError>> {
     const body: Record<string, unknown> = {
       submolt_name: options.submolt,
       title: options.title,
@@ -244,14 +167,15 @@ export class MoltbookAgent {
     if (options.url) body.url = options.url;
     if (options.type) body.type = options.type;
 
-    const doCreate = () => http(`${this.baseUrl}/posts`, {
-      method: "POST",
-      headers: {
-        Authorization: `Bearer ${this.apiKey}`,
-        "Content-Type": "application/json",
-      },
-      body,
-    });
+    const doCreate = () =>
+      http(`${this.baseUrl}/posts`, {
+        method: "POST",
+        headers: {
+          Authorization: `Bearer ${this.apiKey}`,
+          "Content-Type": "application/json",
+        },
+        body,
+      });
 
     let { status, data } = await doCreate();
 
@@ -262,20 +186,20 @@ export class MoltbookAgent {
     }
 
     if (status >= 400) {
-      throw new Error(`Post creation failed: ${status} - ${JSON.stringify(data)}`);
+      return err(new MoltbookApiError(`Post creation failed: ${status}`, status, data));
     }
 
     // Handle nested post object in response
     const resp = data as Record<string, unknown>;
     const postData = (resp.post ?? resp) as Record<string, unknown>;
-    
-    return {
+
+    return ok({
       id: (postData.id ?? "") as string,
       url: (postData.url ?? `https://www.moltbook.com/p/${postData.id ?? ""}`) as string,
       title: (postData.title ?? "") as string,
       content: (postData.content ?? "") as string,
       createdAt: (postData.created_at ?? postData.createdAt ?? new Date().toISOString()) as string,
-    };
+    });
   }
 
   /**
@@ -288,8 +212,8 @@ export class MoltbookAgent {
       model?: string;
       style?: string;
       maxLength?: number;
-    }
-  ): Promise<PostResponse> {
+    },
+  ): Promise<Result<PostResponse, MoltbookApiError>> {
     const prompt = `Create a Moltbook post about "${topic}" for the /m/${submolt} submolt.
 ${options?.style ? `Style: ${options.style}` : ""}
 ${options?.maxLength ? `Maximum length: ${options.maxLength} characters` : ""}
@@ -308,7 +232,12 @@ Output only the post content, no meta-commentary.`;
       maxTokens: options?.maxLength ?? 1000,
     };
 
-    const response = await this.gateway.generate(request);
+    let response;
+    try {
+      response = await this.gateway.generate(request);
+    } catch (e) {
+      return err(new MoltbookApiError(e instanceof Error ? e.message : "Gateway generation failed", 0, e));
+    }
 
     // Extract title from first line or create one
     const lines = response.text.split("\n").filter((l) => l.trim());
@@ -330,21 +259,26 @@ Output only the post content, no meta-commentary.`;
     submolt?: string;
     limit?: number;
     cursor?: string;
-  }): Promise<{
-    posts: Array<{
-      id: string;
-      title: string;
-      content?: string;
-      url?: string;
-      submolt: string;
-      author: string;
-      votes: number;
-      commentCount: number;
-      createdAt: string;
-    }>;
-    hasMore: boolean;
-    nextCursor?: string;
-  }> {
+  }): Promise<
+    Result<
+      {
+        posts: Array<{
+          id: string;
+          title: string;
+          content?: string;
+          url?: string;
+          submolt: string;
+          author: string;
+          votes: number;
+          commentCount: number;
+          createdAt: string;
+        }>;
+        hasMore: boolean;
+        nextCursor?: string;
+      },
+      MoltbookApiError
+    >
+  > {
     const params = new URLSearchParams();
     if (options?.sort) params.set("sort", options.sort);
     if (options?.submolt) params.set("submolt", options.submolt);
@@ -356,7 +290,7 @@ Output only the post content, no meta-commentary.`;
     });
 
     if (status >= 400) {
-      throw new Error(`Feed fetch failed: ${status} - ${JSON.stringify(data)}`);
+      return err(new MoltbookApiError(`Feed fetch failed: ${status}`, status, data));
     }
 
     const resp = data as Record<string, unknown>;
@@ -377,11 +311,11 @@ Output only the post content, no meta-commentary.`;
       };
     });
 
-    return {
+    return ok({
       posts,
       hasMore: (resp.has_more as boolean) ?? false,
       nextCursor: resp.next_cursor as string | undefined,
-    };
+    });
   }
 
   /**
@@ -391,11 +325,16 @@ Output only the post content, no meta-commentary.`;
     sort?: "hot" | "new" | "top";
     filter?: "all" | "following";
     limit?: number;
-  }): Promise<{
-    posts: Post[];
-    has_more: boolean;
-    next_cursor?: string;
-  }> {
+  }): Promise<
+    Result<
+      {
+        posts: Post[];
+        has_more: boolean;
+        next_cursor?: string;
+      },
+      MoltbookApiError
+    >
+  > {
     const params = new URLSearchParams();
     if (options?.sort) params.set("sort", options.sort);
     if (options?.filter) params.set("filter", options.filter);
@@ -406,7 +345,11 @@ Output only the post content, no meta-commentary.`;
   /**
    * Comment on a post. Pass parentId for threaded replies.
    */
-  async comment(postId: string, content: string, parentId?: string): Promise<{ id: string; content: string }> {
+  async comment(
+    postId: string,
+    content: string,
+    parentId?: string,
+  ): Promise<Result<{ id: string; content: string }, MoltbookApiError>> {
     const body: Record<string, string> = { content };
     if (parentId) body.parent_id = parentId;
 
@@ -420,21 +363,21 @@ Output only the post content, no meta-commentary.`;
     });
 
     if (status >= 400) {
-      throw new Error(`Comment failed: ${status} - ${JSON.stringify(data)}`);
+      return err(new MoltbookApiError(`Comment failed: ${status}`, status, data));
     }
 
     const resp = data as Record<string, unknown>;
     const comment = (resp.comment ?? resp) as Record<string, unknown>;
-    return {
+    return ok({
       id: (comment.id ?? "") as string,
       content: (comment.content ?? content) as string,
-    };
+    });
   }
 
   /**
    * Vote on a post.
    */
-  async vote(postId: string, direction: "up" | "down"): Promise<void> {
+  async vote(postId: string, direction: "up" | "down"): Promise<Result<void, MoltbookApiError>> {
     const endpoint = direction === "up" ? "upvote" : "downvote";
     const { status, data } = await http(`${this.baseUrl}/posts/${postId}/${endpoint}`, {
       method: "POST",
@@ -442,19 +385,25 @@ Output only the post content, no meta-commentary.`;
     });
 
     if (status >= 400) {
-      throw new Error(`Vote failed: ${status} - ${JSON.stringify(data)}`);
+      return err(new MoltbookApiError(`Vote failed: ${status}`, status, data));
     }
+    return ok(undefined as void);
   }
 
   /**
    * Update agent profile (description, metadata).
    */
-  async updateProfile(updates: { description?: string; metadata?: Record<string, unknown> }): Promise<{
-    id: string;
-    name: string;
-    description: string;
-    karma: number;
-  }> {
+  async updateProfile(updates: { description?: string; metadata?: Record<string, unknown> }): Promise<
+    Result<
+      {
+        id: string;
+        name: string;
+        description: string;
+        karma: number;
+      },
+      MoltbookApiError
+    >
+  > {
     const { status, data } = await http(`${this.baseUrl}/agents/me`, {
       method: "PATCH",
       headers: {
@@ -465,54 +414,62 @@ Output only the post content, no meta-commentary.`;
     });
 
     if (status >= 400) {
-      throw new Error(`Profile update failed: ${status} - ${JSON.stringify(data)}`);
+      return err(new MoltbookApiError(`Profile update failed: ${status}`, status, data));
     }
 
     const resp = data as Record<string, unknown>;
     const agent = (resp.agent ?? resp) as Record<string, unknown>;
-    return {
+    return ok({
       id: (agent.id ?? "") as string,
       name: (agent.name ?? "") as string,
       description: (agent.description ?? "") as string,
       karma: (agent.karma as number) ?? 0,
-    };
+    });
   }
 
   /**
    * Get agent profile (by name).
    */
-  async getProfile(name: string): Promise<{
-    id: string;
-    name: string;
-    description: string;
-    karma: number;
-    created_at: string;
-    is_claimed: boolean;
-  }> {
+  async getProfile(name: string): Promise<
+    Result<
+      {
+        id: string;
+        name: string;
+        description: string;
+        karma: number;
+        created_at: string;
+        is_claimed: boolean;
+      },
+      MoltbookApiError
+    >
+  > {
     const { status, data } = await http(`${this.baseUrl}/agents/profile?name=${name}`, {
       headers: { Authorization: `Bearer ${this.apiKey}` },
     });
 
     if (status >= 400) {
-      throw new Error(`Profile fetch failed: ${status} - ${JSON.stringify(data)}`);
+      return err(new MoltbookApiError(`Profile fetch failed: ${status}`, status, data));
     }
 
     const resp = data as Record<string, unknown>;
     const agent = (resp.agent ?? resp) as Record<string, unknown>;
-    return {
+    return ok({
       id: (agent.id ?? "") as string,
       name: (agent.name ?? "") as string,
       description: (agent.description ?? "") as string,
       karma: (agent.karma as number) ?? 0,
       created_at: (agent.created_at ?? "") as string,
       is_claimed: (agent.is_claimed as boolean) ?? false,
-    };
+    });
   }
 
   /**
    * Edit a post (if Moltbook supports it - currently not available).
    */
-  async editPost(postId: string, updates: { title?: string; content?: string }): Promise<PostResponse> {
+  async editPost(
+    postId: string,
+    updates: { title?: string; content?: string },
+  ): Promise<Result<PostResponse, MoltbookApiError>> {
     // Note: Moltbook does not currently support post editing via API
     // This is a placeholder for future functionality
     const { status, data } = await http(`${this.baseUrl}/posts/${postId}`, {
@@ -525,78 +482,82 @@ Output only the post content, no meta-commentary.`;
     });
 
     if (status >= 400) {
-      throw new Error(`Post edit failed: ${status} - ${JSON.stringify(data)}`);
+      return err(new MoltbookApiError(`Post edit failed: ${status}`, status, data));
     }
 
-    return data as PostResponse;
+    return ok(data as PostResponse);
   }
 
   /**
    * Delete a post.
    */
-  async deletePost(postId: string): Promise<void> {
+  async deletePost(postId: string): Promise<Result<void, MoltbookApiError>> {
     const { status, data } = await http(`${this.baseUrl}/posts/${postId}`, {
       method: "DELETE",
       headers: { Authorization: `Bearer ${this.apiKey}` },
     });
 
     if (status >= 400) {
-      throw new Error(`Post delete failed: ${status} - ${JSON.stringify(data)}`);
+      return err(new MoltbookApiError(`Post delete failed: ${status}`, status, data));
     }
+    return ok(undefined as void);
   }
 
   /**
    * Subscribe to a submolt.
    */
-  async subscribe(submoltName: string): Promise<void> {
+  async subscribe(submoltName: string): Promise<Result<void, MoltbookApiError>> {
     const { status, data } = await http(`${this.baseUrl}/submolts/${submoltName}/subscribe`, {
       method: "POST",
       headers: { Authorization: `Bearer ${this.apiKey}` },
     });
 
     if (status >= 400) {
-      throw new Error(`Subscribe failed: ${status} - ${JSON.stringify(data)}`);
+      return err(new MoltbookApiError(`Subscribe failed: ${status}`, status, data));
     }
+    return ok(undefined as void);
   }
 
   /**
    * Follow another agent.
    */
-  async follow(agentName: string): Promise<void> {
+  async follow(agentName: string): Promise<Result<void, MoltbookApiError>> {
     const { status, data } = await http(`${this.baseUrl}/agents/${agentName}/follow`, {
       method: "POST",
       headers: { Authorization: `Bearer ${this.apiKey}` },
     });
 
     if (status >= 400) {
-      throw new Error(`Follow failed: ${status} - ${JSON.stringify(data)}`);
+      return err(new MoltbookApiError(`Follow failed: ${status}`, status, data));
     }
+    return ok(undefined as void);
   }
 
   /**
    * Unfollow another agent.
    */
-  async unfollow(agentName: string): Promise<void> {
+  async unfollow(agentName: string): Promise<Result<void, MoltbookApiError>> {
     const { status, data } = await http(`${this.baseUrl}/agents/${agentName}/unfollow`, {
       method: "POST",
       headers: { Authorization: `Bearer ${this.apiKey}` },
     });
 
     if (status >= 400) {
-      throw new Error(`Unfollow failed: ${status} - ${JSON.stringify(data)}`);
+      return err(new MoltbookApiError(`Unfollow failed: ${status}`, status, data));
     }
+    return ok(undefined as void);
   }
 
   // ─── SDK methods (comprehensive API coverage) ──────────────────────
 
   /** Get home dashboard (recommended first call each session) */
-  async getHome(): Promise<HomeData> {
+  async getHome(): Promise<Result<HomeData, MoltbookApiError>> {
     const { status, data } = await http(`${this.baseUrl}/home`, {
       headers: { Authorization: `Bearer ${this.apiKey}` },
     });
 
     if (status >= 400) {
-      throw new Error(`Home fetch failed: ${status} - ${JSON.stringify(data)}`);
+      return err(new MoltbookApiError(`Home fetch failed: ${status}`, status, data));
     }
 
     const resp = data as Record<string, unknown>;
@@ -616,10 +577,18 @@ Output only the post content, no meta-commentary.`;
         comment_count: (p.comment_count as number) ?? 0,
         created_at: (p.created_at ?? "") as string,
         submolt: submolt
-          ? { id: (submolt.id ?? "") as string, name: (submolt.name ?? "") as string, display_name: (submolt.display_name ?? submolt.name ?? "") as string }
+          ? {
+              id: (submolt.id ?? "") as string,
+              name: (submolt.name ?? "") as string,
+              display_name: (submolt.display_name ?? submolt.name ?? "") as string,
+            }
           : { id: "", name: "", display_name: "" },
         author: author
-          ? { id: (author.id ?? "") as string, name: (author.name ?? "") as string, karma: author.karma as number | undefined }
+          ? {
+              id: (author.id ?? "") as string,
+              name: (author.name ?? "") as string,
+              karma: author.karma as number | undefined,
+            }
           : { id: "", name: "", karma: undefined },
       };
     });
@@ -639,7 +608,7 @@ Output only the post content, no meta-commentary.`;
 
     const whatToDoNext = (resp.what_to_do_next ?? []) as string[];
 
-    return {
+    return ok({
       your_account: {
         name: (account.name ?? "") as string,
         karma: (account.karma as number) ?? 0,
@@ -658,11 +627,11 @@ Output only the post content, no meta-commentary.`;
         total_following: (followFeed.total_following as number) ?? 0,
       },
       what_to_do_next: whatToDoNext,
-    };
+    });
   }
 
   /** Get a single post with full comments */
-  async getPost(id: string): Promise<{ post: Post; comments: Comment[] }> {
+  async getPost(id: string): Promise<Result<{ post: Post; comments: Comment[] }, MoltbookApiError>> {
     return this.request("GET", `/posts/${id}`);
   }
 
@@ -673,12 +642,17 @@ Output only the post content, no meta-commentary.`;
     limit?: number;
     offset?: number;
     time?: "hour" | "day" | "week" | "month" | "all";
-  }): Promise<{
-    posts: Post[];
-    count: number;
-    has_more: boolean;
-    next_offset?: number;
-  }> {
+  }): Promise<
+    Result<
+      {
+        posts: Post[];
+        count: number;
+        has_more: boolean;
+        next_offset?: number;
+      },
+      MoltbookApiError
+    >
+  > {
     const params = new URLSearchParams();
     if (options?.sort) params.set("sort", options.sort);
     if (options?.submolt) params.set("submolt", options.submolt);
@@ -692,7 +666,7 @@ Output only the post content, no meta-commentary.`;
   async listComments(
     postId: string,
     options?: { sort?: "old" | "new" | "top" | "controversial"; limit?: number },
-  ): Promise<{ comments: Comment[]; count: number }> {
+  ): Promise<Result<{ comments: Comment[]; count: number }, MoltbookApiError>> {
     const params = new URLSearchParams();
     if (options?.sort) params.set("sort", options.sort);
     if (options?.limit) params.set("limit", String(options.limit));
@@ -700,36 +674,36 @@ Output only the post content, no meta-commentary.`;
   }
 
   /** Upvote a comment */
-  async upvoteComment(commentId: string): Promise<void> {
-    await this.request("POST", `/comments/${commentId}/upvote`);
+  async upvoteComment(commentId: string): Promise<Result<void, MoltbookApiError>> {
+    return this.request("POST", `/comments/${commentId}/upvote`);
   }
 
   /** Downvote a comment */
-  async downvoteComment(commentId: string): Promise<void> {
-    await this.request("POST", `/comments/${commentId}/downvote`);
+  async downvoteComment(commentId: string): Promise<Result<void, MoltbookApiError>> {
+    return this.request("POST", `/comments/${commentId}/downvote`);
   }
 
   /** Solve a verification challenge */
-  async verify(verificationCode: string, answer: string): Promise<void> {
-    await this.request("POST", "/verify", {
+  async verify(verificationCode: string, answer: string): Promise<Result<void, MoltbookApiError>> {
+    return this.request("POST", "/verify", {
       verification_code: verificationCode,
       answer,
     });
   }
 
   /** Get your own profile */
-  async getMe(): Promise<AgentProfile> {
+  async getMe(): Promise<Result<AgentProfile, MoltbookApiError>> {
     const { status, data } = await http(`${this.baseUrl}/agents/me`, {
       headers: { Authorization: `Bearer ${this.apiKey}` },
     });
 
     if (status >= 400) {
-      throw new Error(`Profile fetch failed: ${status} - ${JSON.stringify(data)}`);
+      return err(new MoltbookApiError(`Profile fetch failed: ${status}`, status, data));
     }
 
     const resp = data as Record<string, unknown>;
     const a = (resp.agent ?? resp) as Record<string, unknown>;
-    return {
+    return ok({
       id: (a.id ?? "") as string,
       name: (a.name ?? "") as string,
       description: (a.description ?? "") as string,
@@ -740,16 +714,16 @@ Output only the post content, no meta-commentary.`;
       is_claimed: (a.is_claimed as boolean) ?? false,
       follower_count: (a.follower_count as number) ?? 0,
       following_count: (a.following_count as number) ?? 0,
-    };
+    });
   }
 
   /** List all submolts */
-  async listSubmolts(): Promise<{ submolts: Submolt[] }> {
+  async listSubmolts(): Promise<Result<{ submolts: Submolt[] }, MoltbookApiError>> {
     return this.request("GET", "/submolts");
   }
 
   /** Get a submolt's details */
-  async getSubmolt(name: string): Promise<{ submolt: Submolt }> {
+  async getSubmolt(name: string): Promise<Result<{ submolt: Submolt }, MoltbookApiError>> {
     return this.request("GET", `/submolts/${name}`);
   }
 
@@ -757,20 +731,25 @@ Output only the post content, no meta-commentary.`;
   async search(
     query: string,
     options?: { type?: "posts" | "comments" | "all"; limit?: number; cursor?: string },
-  ): Promise<{
-    results: Array<{
-      id: string;
-      type: "post" | "comment";
-      title?: string;
-      content: string;
-      similarity: number;
-      author: { id: string; name: string };
-      post_id?: string;
-    }>;
-    count: number;
-    has_more: boolean;
-    next_cursor?: string;
-  }> {
+  ): Promise<
+    Result<
+      {
+        results: Array<{
+          id: string;
+          type: "post" | "comment";
+          title?: string;
+          content: string;
+          similarity: number;
+          author: { id: string; name: string };
+          post_id?: string;
+        }>;
+        count: number;
+        has_more: boolean;
+        next_cursor?: string;
+      },
+      MoltbookApiError
+    >
+  > {
     const params = new URLSearchParams({ q: query });
     if (options?.type) params.set("type", options.type);
     if (options?.limit) params.set("limit", String(options.limit));
@@ -779,20 +758,22 @@ Output only the post content, no meta-commentary.`;
   }
 
   /** Get notifications */
-  async getNotifications(options?: {
-    limit?: number;
-    unread_only?: boolean;
-  }): Promise<{
-    notifications: Array<{
-      id: string;
-      type: string;
-      message: string;
-      post_id?: string;
-      agent_name?: string;
-      created_at: string;
-      read: boolean;
-    }>;
-  }> {
+  async getNotifications(options?: { limit?: number; unread_only?: boolean }): Promise<
+    Result<
+      {
+        notifications: Array<{
+          id: string;
+          type: string;
+          message: string;
+          post_id?: string;
+          agent_name?: string;
+          created_at: string;
+          read: boolean;
+        }>;
+      },
+      MoltbookApiError
+    >
+  > {
     const params = new URLSearchParams();
     if (options?.limit) params.set("limit", String(options.limit));
     if (options?.unread_only) params.set("unread_only", "true");
@@ -802,11 +783,9 @@ Output only the post content, no meta-commentary.`;
   /**
    * Mark notifications as read for a specific post, or all.
    */
-  async markNotificationsRead(postId?: string): Promise<void> {
-    const path = postId
-      ? `/notifications/read-by-post/${postId}`
-      : "/notifications/read-all";
-    await this.request("POST", path);
+  async markNotificationsRead(postId?: string): Promise<Result<void, MoltbookApiError>> {
+    const path = postId ? `/notifications/read-by-post/${postId}` : "/notifications/read-all";
+    return this.request("POST", path);
   }
 
   /** Solve the alternating-caps math challenge from comment verification */
@@ -823,10 +802,7 @@ Output only the post content, no meta-commentary.`;
 /**
  * Create a Moltbook agent.
  */
-export function createMoltbookAgent(
-  gateway: Gateway,
-  config?: MoltbookConfig,
-): MoltbookAgent {
+export function createMoltbookAgent(gateway: Gateway, config?: MoltbookConfig): MoltbookAgent {
   return new MoltbookAgent(gateway, config);
 }
 

@@ -9,6 +9,10 @@
  */
 
 import { Worker } from "node:worker_threads";
+import type { FeedPostForScoring, ScoredPost } from "./types.js";
+
+// Re-export from types for backward compatibility
+export type { FeedPostForScoring, ScoredPost } from "./types.js";
 
 // ── Types ────────────────────────────────────────────────────────────
 
@@ -16,21 +20,6 @@ export type SubAgentTask =
   | { type: "score_feed"; posts: FeedPostForScoring[]; agentValues: string[]; prompt: string }
   | { type: "detect_trends"; posts: FeedPostForScoring[]; prompt: string }
   | { type: "score_comment"; postTitle: string; postContent: string; agentStyle: string; prompt: string };
-
-export type FeedPostForScoring = {
-  id: string;
-  title: string;
-  content?: string;
-  submolt: string;
-  author: string;
-  upvotes: number;
-  comment_count: number;
-};
-
-export type ScoredPost = FeedPostForScoring & {
-  score: number;
-  reasons: string[];
-};
 
 export type SubAgentResult =
   | { type: "scored_feed"; posts: ScoredPost[] }

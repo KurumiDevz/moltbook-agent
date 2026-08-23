@@ -13,73 +13,12 @@
  * On restart, the agent reads the summary and resumes from where it left off.
  */
 
-import { readFileSync, writeFileSync, existsSync } from "node:fs";
+import { readFileSync, writeFileSync, existsSync, mkdirSync } from "node:fs";
 import { resolve } from "node:path";
+import type { PostSummary, TaskQueueItem, ActivitySummary } from "./types.js";
 
-// ── Types ────────────────────────────────────────────────────────────
-
-export type PostSummary = {
-  id: string;
-  title: string;
-  submolt: string;
-  type: string;
-  upvotes: number;
-  comments: number;
-  timestamp: number;
-};
-
-export type AgentInteraction = {
-  agentName: string;
-  type: string; // "commented_on", "upvoted_by", "followed"
-  count: number;
-  lastAt: number;
-};
-
-export type TaskStatus = "pending" | "in_progress" | "completed" | "failed" | "skipped";
-
-export type TaskQueueItem = {
-  id: string;
-  type: "post" | "comment" | "upvote" | "follow" | "engage";
-  description: string;
-  target?: string; // post ID, agent name, topic, etc.
-  status: TaskStatus;
-  createdAt: number;
-  completedAt?: number;
-  result?: string; // success/failure message
-};
-
-export type ActivitySummary = {
-  /** When this summary was generated */
-  generatedAt: number;
-  /** Total posts made */
-  totalPosts: number;
-  /** Total comments made */
-  totalComments: number;
-  /** Total upvotes given */
-  totalUpvotes: number;
-  /** Current karma (from API) */
-  karma: number;
-  /** Top performing post types (sorted by avg upvotes) */
-  topPostTypes: Array<{ type: string; count: number; avgUpvotes: number }>;
-  /** Submolts posted to (sorted by activity) */
-  submoltActivity: Array<{ submolt: string; count: number }>;
-  /** Topics already covered (dedup reference) */
-  topicsCovered: string[];
-  /** Agents interacted with */
-  agentsInteracted: AgentInteraction[];
-  /** Recent engagement trend: "growing" | "stable" | "declining" */
-  engagementTrend: string;
-  /** One-line insight for the AI */
-  insight: string;
-  /** Task queue: completed tasks */
-  completedTasks: TaskQueueItem[];
-  /** Task queue: pending tasks not yet started */
-  pendingTasks: TaskQueueItem[];
-  /** What the agent should do next on resume */
-  nextAction: string;
-  /** Last cycle number when this summary was generated */
-  lastCycleNumber: number;
-};
+// Re-export from types for backward compatibility
+export type { PostSummary, AgentInteraction, TaskStatus, TaskQueueItem, ActivitySummary } from "./types.js";
 
 // ── Summary Generator ────────────────────────────────────────────────
 
@@ -159,17 +98,10 @@ export class SummaryGenerator {
     // Engagement trend (simple: compare last 5 posts vs previous 5)
     const recentPosts = postHistory.slice(-5);
     const olderPosts = postHistory.slice(-10, -5);
-    const recentAvg = recentPosts.length > 0
-      ? recentPosts.reduce((s, p) => s + p.upvotes, 0) / recentPosts.length
-      : 0;
-    const olderAvg = olderPosts.length > 0
-      ? olderPosts.reduce((s, p) => s + p.upvotes, 0) / olderPosts.length
-      : 0;
-    const engagementTrend = recentAvg > olderAvg * 1.2
-      ? "growing"
-      : recentAvg < olderAvg * 0.8
-        ? "declining"
-        : "stable";
+    const recentAvg = recentPosts.length > 0 ? recentPosts.reduce((s, p) => s + p.upvotes, 0) / recentPosts.length : 0;
+    const olderAvg = olderPosts.length > 0 ? olderPosts.reduce((s, p) => s + p.upvotes, 0) / olderPosts.length : 0;
+    const engagementTrend =
+      recentAvg > olderAvg * 1.2 ? "growing" : recentAvg < olderAvg * 0.8 ? "declining" : "stable";
 
     // One-line insight
     const bestType = topPostTypes[0];
@@ -203,6 +135,7 @@ export class SummaryGenerator {
       pendingTasks,
       nextAction,
       lastCycleNumber: cycleNumber,
+      repliedCommentIds: this.getRepliedCommentIds(),
     };
   }
 
@@ -210,9 +143,10 @@ export class SummaryGenerator {
   save(summary: ActivitySummary): void {
     const dir = this.summaryPath.split("/").slice(0, -1).join("/");
     try {
-      const { mkdirSync } = require("node:fs");
       mkdirSync(dir, { recursive: true });
-    } catch { /* already exists */ }
+    } catch {
+      /* already exists */
+    }
     writeFileSync(this.summaryPath, JSON.stringify(summary, null, 2));
   }
 
@@ -226,6 +160,12 @@ export class SummaryGenerator {
     }
   }
 
+  /** Get comment IDs we've already replied to (persisted across restarts). */
+  getRepliedCommentIds(): string[] {
+    const summary = this.load();
+    return summary?.repliedCommentIds ?? [];
+  }
+
   /**
    * Format summary as compact text for the AI prompt.
    * This replaces sending raw history. Includes task queue status.
@@ -234,7 +174,9 @@ export class SummaryGenerator {
     const lines: string[] = [];
 
     lines.push("## Activity Summary (auto-generated)");
-    lines.push(`- Posts: ${summary.totalPosts} | Comments: ${summary.totalComments} | Upvotes: ${summary.totalUpvotes} | Karma: ${summary.karma}`);
+    lines.push(
+      `- Posts: ${summary.totalPosts} | Comments: ${summary.totalComments} | Upvotes: ${summary.totalUpvotes} | Karma: ${summary.karma}`,
+    );
     lines.push(`- Engagement trend: ${summary.engagementTrend}`);
     lines.push(`- ${summary.insight}`);
 
@@ -260,7 +202,9 @@ export class SummaryGenerator {
     }
 
     if (summary.topicsCovered.length > 0) {
-      lines.push(`- Topics covered (last ${Math.min(summary.topicsCovered.length, 15)}): ${summary.topicsCovered.slice(0, 15).join("; ")}`);
+      lines.push(
+        `- Topics covered (last ${Math.min(summary.topicsCovered.length, 15)}): ${summary.topicsCovered.slice(0, 15).join("; ")}`,
+      );
     }
 
     // Task queue status
@@ -292,12 +236,7 @@ export class SummaryGenerator {
   // ── Task Queue Management ──────────────────────────────────────────
 
   /** Add a task to the queue. Returns the task with generated ID. */
-  addTask(
-    queue: TaskQueueItem[],
-    type: TaskQueueItem["type"],
-    description: string,
-    target?: string,
-  ): TaskQueueItem {
+  addTask(queue: TaskQueueItem[], type: TaskQueueItem["type"], description: string, target?: string): TaskQueueItem {
     const task: TaskQueueItem = {
       id: `task-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`,
       type,

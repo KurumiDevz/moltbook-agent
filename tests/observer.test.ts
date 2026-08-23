@@ -4,6 +4,7 @@ import { Observer, type ScoredPost } from "../src/agent/observer.js";
 import type { MoltbookAgent } from "../src/moltbook.js";
 import type { Personality } from "../src/agent/personality.js";
 import type { Memory } from "../src/agent/memory.js";
+import { ok } from "../src/result.js";
 
 // ── Helpers ─────────────────────────────────────────────────────────
 
@@ -36,12 +37,12 @@ function makeNotification(overrides: Record<string, unknown> = {}) {
 
 function buildMockAgent(overrides: Partial<MoltbookAgent> = {}): MoltbookAgent {
   return {
-    getFeed: mock.fn(async () => ({ posts: [makePost()], hasMore: false })),
-    getNotifications: mock.fn(async () => ({ notifications: [makeNotification()] })),
-    createPost: mock.fn(async () => ({ id: "p1", url: "/", title: "", createdAt: "" })),
-    comment: mock.fn(async () => ({ id: "c1", content: "" })),
-    vote: mock.fn(async () => {}),
-    follow: mock.fn(async () => {}),
+    getFeed: mock.fn(async () => ok({ posts: [makePost()], hasMore: false })),
+    getNotifications: mock.fn(async () => ok({ notifications: [makeNotification()] })),
+    createPost: mock.fn(async () => ok({ id: "p1", url: "/", title: "", createdAt: "" })),
+    comment: mock.fn(async () => ok({ id: "c1", content: "" })),
+    vote: mock.fn(async () => ok(undefined as void)),
+    follow: mock.fn(async () => ok(undefined as void)),
     ...overrides,
   } as unknown as MoltbookAgent;
 }
@@ -76,7 +77,7 @@ describe("Observer", () => {
   describe("observeFeed", () => {
     it("fetches posts and returns scored results sorted by score descending", async () => {
       const agent = buildMockAgent({
-        getFeed: mock.fn(async () => ({
+        getFeed: mock.fn(async () => ok({
           posts: [
             makePost({ id: "p1", title: "Low quality post", votes: 1, commentCount: 0 }),
             makePost({ id: "p2", title: "High quality post", votes: 100, commentCount: 20 }),
@@ -99,7 +100,7 @@ describe("Observer", () => {
 
     it("returns empty arrays when feed is empty", async () => {
       const agent = buildMockAgent({
-        getFeed: mock.fn(async () => ({ posts: [], hasMore: false })),
+        getFeed: mock.fn(async () => ok({ posts: [], hasMore: false })),
       });
       const personality = buildMockPersonality();
       const observer = new Observer(agent, personality);
@@ -112,7 +113,7 @@ describe("Observer", () => {
 
     it("includes scoring reasons based on personality alignment", async () => {
       const agent = buildMockAgent({
-        getFeed: mock.fn(async () => ({
+        getFeed: mock.fn(async () => ok({
           posts: [makePost({ id: "p1", commentCount: 10 })],
           hasMore: false,
         })),
@@ -139,7 +140,7 @@ describe("Observer", () => {
   describe("checkNotifications", () => {
     it("parses notification summary with reply and mention counts", async () => {
       const agent = buildMockAgent({
-        getNotifications: mock.fn(async () => ({
+        getNotifications: mock.fn(async () => ok({
           notifications: [
             makeNotification({ id: "n1", type: "reply", message: "Reply 1", agent_name: "bob" }),
             makeNotification({ id: "n2", type: "mention", message: "Mention 1", agent_name: "carol" }),
@@ -162,7 +163,7 @@ describe("Observer", () => {
 
     it("returns zero counts when no notifications", async () => {
       const agent = buildMockAgent({
-        getNotifications: mock.fn(async () => ({ notifications: [] })),
+        getNotifications: mock.fn(async () => ok({ notifications: [] })),
       });
       const personality = buildMockPersonality();
       const observer = new Observer(agent, personality);
@@ -179,7 +180,7 @@ describe("Observer", () => {
         makeNotification({ id: `n${i}`, type: "reply", message: `Reply ${i}` })
       );
       const agent = buildMockAgent({
-        getNotifications: mock.fn(async () => ({ notifications })),
+        getNotifications: mock.fn(async () => ok({ notifications })),
       });
       const personality = buildMockPersonality();
       const observer = new Observer(agent, personality);

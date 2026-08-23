@@ -41,10 +41,26 @@ export class Executor {
           const { topic, submolt } = action;
           if (!topic) return { success: false, action, message: "No topic available" };
           const result = await this.brain.generatePost(topic, submolt);
-          const posted = await this.agent.createPost({ submolt, title: result.title, content: result.content });
+          const posted = (
+            await this.agent.createPost({ submolt, title: result.title, content: result.content })
+          ).unwrap();
           this.brain.recordPost();
-          memory.recordInteraction({ type: "post", content: result.content, timestamp: Date.now(), karmaDelta: 1, mood: personality.state.mood });
-          memory.recordPost({ id: posted.id, title: result.title, submolt, type: result.postType, upvotes: 0, comments: 0, timestamp: Date.now() });
+          memory.recordInteraction({
+            type: "post",
+            content: result.content,
+            timestamp: Date.now(),
+            karmaDelta: 1,
+            mood: personality.state.mood,
+          });
+          memory.recordPost({
+            id: posted.id,
+            title: result.title,
+            submolt,
+            type: result.postType,
+            upvotes: 0,
+            comments: 0,
+            timestamp: Date.now(),
+          });
           memory.trackTopic(topic, result.postType);
           personality.shiftMood("good_post");
           return { success: true, action, message: `Posted: ${result.title}`, karmaDelta: 1 };
@@ -52,34 +68,59 @@ export class Executor {
 
         case "comment": {
           const { postId } = action;
-          const { posts } = await this.agent.getFeed({ sort: "hot", limit: 5 });
+          const { posts } = (await this.agent.getFeed({ sort: "hot", limit: 5 })).unwrap();
           const target = posts.find((p) => p.id === postId) ?? posts[0];
           if (!target) return { success: false, action, message: "No post found to comment on" };
           const content = await this.brain.generateComment(target.title, target.submolt);
-          await this.agent.comment(postId, content);
+          await (await this.agent.comment(postId, content)).unwrap();
           this.brain.recordComment();
-          memory.recordInteraction({ type: "comment", target: postId, content, timestamp: Date.now(), karmaDelta: 1, mood: personality.state.mood });
+          memory.recordInteraction({
+            type: "comment",
+            target: postId,
+            content,
+            timestamp: Date.now(),
+            karmaDelta: 1,
+            mood: personality.state.mood,
+          });
           memory.trackTopic(target.title, "comment");
           return { success: true, action, message: "Comment posted", karmaDelta: 1 };
         }
 
         case "upvote": {
-          await this.agent.vote(action.postId, "up");
-          memory.recordInteraction({ type: "upvote", target: action.postId, timestamp: Date.now(), karmaDelta: 0, mood: personality.state.mood });
+          await (await this.agent.vote(action.postId, "up")).unwrap();
+          memory.recordInteraction({
+            type: "upvote",
+            target: action.postId,
+            timestamp: Date.now(),
+            karmaDelta: 0,
+            mood: personality.state.mood,
+          });
           personality.shiftMood("karma_gain");
           return { success: true, action, message: "Upvoted", karmaDelta: 0 };
         }
 
         case "downvote": {
-          await this.agent.vote(action.postId, "down");
-          memory.recordInteraction({ type: "downvote", target: action.postId, timestamp: Date.now(), karmaDelta: 0, mood: personality.state.mood });
+          await (await this.agent.vote(action.postId, "down")).unwrap();
+          memory.recordInteraction({
+            type: "downvote",
+            target: action.postId,
+            timestamp: Date.now(),
+            karmaDelta: 0,
+            mood: personality.state.mood,
+          });
           return { success: true, action, message: "Downvoted", karmaDelta: 0 };
         }
 
         case "follow": {
-          await this.agent.follow(action.agentName);
+          await (await this.agent.follow(action.agentName)).unwrap();
           memory.updateRelationship(action.agentName, { followed: true, lastInteraction: Date.now() });
-          memory.recordInteraction({ type: "follow", target: action.agentName, timestamp: Date.now(), karmaDelta: 0, mood: personality.state.mood });
+          memory.recordInteraction({
+            type: "follow",
+            target: action.agentName,
+            timestamp: Date.now(),
+            karmaDelta: 0,
+            mood: personality.state.mood,
+          });
           return { success: true, action, message: `Followed ${action.agentName}`, karmaDelta: 0 };
         }
 
@@ -88,7 +129,7 @@ export class Executor {
           let checked = 0;
           for (const post of unchecked.slice(0, 5)) {
             try {
-              const fresh = await this.agent.getPost(post.id);
+              const fresh = (await this.agent.getPost(post.id)).unwrap();
               memory.updateEngagement(post.type, fresh.post.upvotes, fresh.post.comment_count);
               memory.markEngagementChecked(post.id);
               checked++;

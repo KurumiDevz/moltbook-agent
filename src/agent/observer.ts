@@ -1,6 +1,10 @@
 import type { MoltbookAgent } from "../moltbook.js";
 import type { Personality } from "./personality.js";
 import type { Memory } from "./memory.js";
+import type { Trend, InterestingAgent } from "../types.js";
+
+// Re-export from types for backward compatibility
+export type { Trend, InterestingAgent } from "../types.js";
 
 export type ScoredPost = {
   post: {
@@ -30,28 +34,74 @@ export type NotificationSummary = {
   }>;
 };
 
-export type Trend = {
-  keyword: string;
-  heat: number;
-  postCount: number;
-  postIds: string[];
-};
-
-export type InterestingAgent = {
-  name: string;
-  avgKarma: number;
-  postCount: number;
-  topics: string[];
-};
-
 const STOP_WORDS = new Set([
-  "the", "a", "an", "is", "it", "to", "in", "for", "of", "and", "or",
-  "my", "i", "we", "you", "they", "this", "that", "with", "on", "at",
-  "do", "did", "does", "has", "have", "had", "was", "were", "be", "been",
-  "will", "would", "can", "could", "should", "may", "might", "so", "but",
-  "not", "no", "if", "then", "than", "just", "how", "what", "why", "when",
-  "who", "which", "about", "from", "up", "out", "all", "some", "any",
-  "here", "there", "your", "its", "our", "their", "into", "also",
+  "the",
+  "a",
+  "an",
+  "is",
+  "it",
+  "to",
+  "in",
+  "for",
+  "of",
+  "and",
+  "or",
+  "my",
+  "i",
+  "we",
+  "you",
+  "they",
+  "this",
+  "that",
+  "with",
+  "on",
+  "at",
+  "do",
+  "did",
+  "does",
+  "has",
+  "have",
+  "had",
+  "was",
+  "were",
+  "be",
+  "been",
+  "will",
+  "would",
+  "can",
+  "could",
+  "should",
+  "may",
+  "might",
+  "so",
+  "but",
+  "not",
+  "no",
+  "if",
+  "then",
+  "than",
+  "just",
+  "how",
+  "what",
+  "why",
+  "when",
+  "who",
+  "which",
+  "about",
+  "from",
+  "up",
+  "out",
+  "all",
+  "some",
+  "any",
+  "here",
+  "there",
+  "your",
+  "its",
+  "our",
+  "their",
+  "into",
+  "also",
 ]);
 
 function extractKeywords(text: string): string[] {
@@ -66,7 +116,9 @@ function keywordSimilarity(a: string[], b: string[]): number {
   if (a.length === 0 || b.length === 0) return 0;
   const setA = new Set(a);
   let matches = 0;
-  for (const word of b) { if (setA.has(word)) matches++; }
+  for (const word of b) {
+    if (setA.has(word)) matches++;
+  }
   return matches / Math.max(setA.size, b.length);
 }
 
@@ -81,7 +133,9 @@ export class Observer {
     sort: "hot" | "new" | "top" | "rising" = "hot",
     limit = 25,
   ): Promise<{ posts: ScoredPost[]; hasMore: boolean }> {
-    const { posts, hasMore } = await this.agent.getFeed({ sort, limit });
+    const feedResult = await this.agent.getFeed({ sort, limit });
+    if (feedResult.isErr()) return { posts: [], hasMore: false };
+    const { posts, hasMore } = feedResult.value;
     const scored: ScoredPost[] = posts.map((post) => {
       const reasons: string[] = [];
       let score = 5; // base score so every post is at least interactable
@@ -116,7 +170,9 @@ export class Observer {
 
   /** Fetch notifications and summarize them. */
   async checkNotifications(): Promise<NotificationSummary> {
-    const { notifications } = await this.agent.getNotifications({ limit: 50 });
+    const notifResult = await this.agent.getNotifications({ limit: 50 });
+    if (notifResult.isErr()) return { replyCount: 0, mentionCount: 0, recentActivity: [] };
+    const { notifications } = notifResult.value;
     let replyCount = 0;
     let mentionCount = 0;
     const recentActivity: NotificationSummary["recentActivity"] = [];
@@ -164,11 +220,7 @@ export class Observer {
   }
 
   /** Find high-karma authors not yet followed. */
-  findInterestingAgents(
-    posts: ScoredPost[],
-    memory: Memory,
-    minKarma = 50,
-  ): InterestingAgent[] {
+  findInterestingAgents(posts: ScoredPost[], memory: Memory, minKarma = 50): InterestingAgent[] {
     const authorStats = new Map<string, { totalKarma: number; count: number; topics: string[] }>();
     for (const { post } of posts) {
       const existing = authorStats.get(post.author) ?? { totalKarma: 0, count: 0, topics: [] };

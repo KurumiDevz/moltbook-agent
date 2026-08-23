@@ -10,11 +10,25 @@
 
 import type { MoltbookAgent } from "./moltbook.js";
 import type { Gateway } from "./gateway.js";
-import { BrainV2, type AgentDecision, type FeedPost, type NotificationItem, type RateLimitState } from "./brain-v2.js";
-import { runSubAgentTask, type ScoredPost } from "./sub-agent.js";
-import { SummaryGenerator, type ActivitySummary, type TaskQueueItem } from "./summary.js";
+import { BrainV2 } from "./brain-v2.js";
+import { runSubAgentTask } from "./sub-agent.js";
+import { SummaryGenerator } from "./summary.js";
 import { SkillValidator } from "./skill-validator.js";
 import { resolve } from "node:path";
+import type {
+  AgentDecision,
+  FeedPost,
+  NotificationItem,
+  RateLimitState,
+  ExecutionResult,
+  PostSummary,
+  TaskQueueItem,
+  ActivitySummary,
+  ScoredPost,
+} from "./types.js";
+
+// Re-export for backward compatibility
+export type { ExecutionResult } from "./types.js";
 
 // ── Types ────────────────────────────────────────────────────────────
 
@@ -34,27 +48,10 @@ export type AgentV2Config = {
   dataDir?: string;
 };
 
-export type ExecutionResult = {
-  success: boolean;
-  action: string;
-  message: string;
-  karmaDelta?: number;
-};
-
 // ── Memory (simplified) ─────────────────────────────────────────────
 
-type PostRecord = {
-  id: string;
-  title: string;
-  submolt: string;
-  type: string;
-  upvotes: number;
-  comments: number;
-  timestamp: number;
-};
-
 type MemoryState = {
-  postHistory: PostRecord[];
+  postHistory: PostSummary[];
   topicsSeen: Array<{ topic: string; timestamp: number }>;
   totalPosts: number;
   totalComments: number;
@@ -63,6 +60,8 @@ type MemoryState = {
   lastCommentAt: number;
   lastPostAt: number;
   taskQueue: TaskQueueItem[];
+  /** Comment IDs we've already replied to — prevents double-replies */
+  repliedCommentIds: Set<string>;
 };
 
 // ── AgentV2 ──────────────────────────────────────────────────────────
@@ -110,6 +109,7 @@ export class AgentV2 {
       taskQueue: existingSummary
         ? [...(existingSummary.completedTasks ?? []), ...(existingSummary.pendingTasks ?? [])]
         : [],
+      repliedCommentIds: new Set(existingSummary?.repliedCommentIds ?? []),
     };
 
     // Resume cycle count from last summary
@@ -154,10 +154,33 @@ export class AgentV2 {
     // 1. Gather context
     console.log("👀 Gathering context...");
     const rawFeed = await this.fetchFeed();
-    const notifications = await this.fetchNotifications();
+    const relevantPosts = await this.fetchRelevantPosts();
+    const allNotifications = await this.fetchNotifications();
     const rateLimits = this.getRateLimits();
     const home = await this.fetchHome();
+
+    // Filter out notifications for comments we already replied to
+    const notifications = allNotifications.filter((n) => {
+      if (n.commentId && this.memory.repliedCommentIds.has(n.commentId)) {
+        return false; // already replied — don't show to AI
+      }
+      return true;
+    });
+    const filteredCount = allNotifications.length - notifications.length;
+    if (filteredCount > 0) {
+      console.log(`   Filtered ${filteredCount} already-replied notifications`);
+    }
+
+    // Merge hot feed + semantic search results (deduplicate by id)
+    const seenIds = new Set(rawFeed.map((p) => p.id));
+    for (const p of relevantPosts) {
+      if (!seenIds.has(p.id)) {
+        rawFeed.push(p);
+        seenIds.add(p.id);
+      }
+    }
     console.log(`   Home: ${home.activity.length} posts with activity | ${home.unreadCount} unread`);
+    console.log(`   Feed: ${rawFeed.length} posts (${relevantPosts.length} from semantic search)`);
 
     // 2. Sub-agent scores feed (lightweight, fire-and-forget)
     console.log("🔍 Sub-agent scoring feed...");
@@ -177,11 +200,7 @@ export class AgentV2 {
         agentValues: ["security", "craft", "honesty", "autonomy"],
         prompt: "",
       };
-      const scored = await runSubAgentTask(
-        task,
-        (opts) => this.gateway.generate(opts),
-        this.subAgentModel,
-      );
+      const scored = await runSubAgentTask(task, (opts) => this.gateway.generate(opts), this.subAgentModel);
       feed = (scored as { type: "scored_feed"; posts: ScoredPost[] }).posts.map((p) => ({
         id: p.id,
         title: p.title,
@@ -212,6 +231,10 @@ export class AgentV2 {
           this.memory.taskQueue,
           this.cycleCount,
         );
+        // Merge in-memory replied comment IDs into summary so they persist across restarts
+        this.lastSummary.repliedCommentIds = [
+          ...new Set([...(this.lastSummary.repliedCommentIds ?? []), ...this.memory.repliedCommentIds]),
+        ];
         // Clean up old completed tasks
         this.memory.taskQueue = this.summaryGen.cleanupQueue(this.memory.taskQueue);
         this.summaryGen.save(this.lastSummary);
@@ -240,15 +263,25 @@ export class AgentV2 {
     // 5. Add task to queue before executing
     const task = this.summaryGen.addTask(
       this.memory.taskQueue,
-      decision.action === "post" ? "post" :
-      decision.action === "comment" ? "comment" :
-      decision.action === "upvote" ? "upvote" :
-      decision.action === "follow" ? "follow" : "engage",
+      decision.action === "post"
+        ? "post"
+        : decision.action === "comment"
+          ? "comment"
+          : decision.action === "upvote"
+            ? "upvote"
+            : decision.action === "follow"
+              ? "follow"
+              : "engage",
       decision.reason,
-      decision.action === "post" ? (decision as any).topic :
-      decision.action === "comment" ? (decision as any).postId :
-      decision.action === "upvote" ? (decision as any).postId :
-      decision.action === "follow" ? (decision as any).agentName : undefined,
+      decision.action === "post"
+        ? decision.topic
+        : decision.action === "comment"
+          ? decision.postId
+          : decision.action === "upvote"
+            ? decision.postId
+            : decision.action === "follow"
+              ? decision.agentName
+              : undefined,
     );
 
     // Persist pending task immediately (crash resilience: task survives mid-cycle crash)
@@ -262,7 +295,9 @@ export class AgentV2 {
       );
       this.summaryGen.save(preExecSummary);
       this.lastSummary = preExecSummary;
-    } catch { /* best effort */ }
+    } catch {
+      /* best effort */
+    }
 
     // 6. Execute
     console.log("⚡ Executing...");
@@ -288,7 +323,9 @@ export class AgentV2 {
       );
       this.summaryGen.save(cycleSummary);
       this.lastSummary = cycleSummary;
-    } catch { /* best effort save */ }
+    } catch {
+      /* best effort save */
+    }
 
     return result;
   }
@@ -297,16 +334,26 @@ export class AgentV2 {
   async dryRun(): Promise<AgentDecision> {
     console.log("\n🧪 Dry run — observe + decide only");
 
-    const feed = await this.fetchFeed();
+    const rawFeed = await this.fetchFeed();
+    const relevantPosts = await this.fetchRelevantPosts();
     const notifications = await this.fetchNotifications();
     const rateLimits = this.getRateLimits();
     const home = await this.fetchHome();
+
+    // Merge hot feed + semantic search results (deduplicate by id)
+    const seenIds = new Set(rawFeed.map((p) => p.id));
+    for (const p of relevantPosts) {
+      if (!seenIds.has(p.id)) {
+        rawFeed.push(p);
+        seenIds.add(p.id);
+      }
+    }
+    const feed = rawFeed;
     console.log(`   Home: ${home.activity.length} posts with activity | ${home.unreadCount} unread`);
+    console.log(`   Feed: ${feed.length} posts (${relevantPosts.length} from semantic search)`);
 
     // Try to load existing summary
-    const summaryText = this.summaryGen.formatForPrompt(
-      this.summaryGen.generate(this.memory.postHistory, [], 0)
-    );
+    const summaryText = this.summaryGen.formatForPrompt(this.summaryGen.generate(this.memory.postHistory, [], 0));
 
     const decision = await this.brain.decide({
       feed,
@@ -376,11 +423,13 @@ export class AgentV2 {
       content = parsed.body;
     }
 
-    const posted = await this.moltbookAgent.createPost({
-      submolt: decision.submolt,
-      title,
-      content,
-    });
+    const posted = (
+      await this.moltbookAgent.createPost({
+        submolt: decision.submolt,
+        title,
+        content,
+      })
+    ).unwrap();
 
     // Record
     this.memory.postHistory.push({
@@ -408,21 +457,21 @@ export class AgentV2 {
       return { success: false, action: "comment", message: "No comment content provided" };
     }
 
-    await this.moltbookAgent.comment(decision.postId, decision.content);
+    await (await this.moltbookAgent.comment(decision.postId, decision.content)).unwrap();
 
     this.memory.totalComments++;
     this.memory.commentsToday++;
     this.memory.lastCommentAt = Date.now();
 
     // Mark notifications as read for the post we commented on (best effort)
-    try {
-      await this.moltbookAgent.markNotificationsRead(decision.postId);
-    } catch { /* best effort */ }
+    this.moltbookAgent.markNotificationsRead(decision.postId);
 
     return { success: true, action: "comment", message: `Commented on ${decision.postId}`, karmaDelta: 1 };
   }
 
-  private async executeReplyToComment(decision: Extract<AgentDecision, { action: "reply_to_comment" }>): Promise<ExecutionResult> {
+  private async executeReplyToComment(
+    decision: Extract<AgentDecision, { action: "reply_to_comment" }>,
+  ): Promise<ExecutionResult> {
     if (!this.getRateLimits().canComment) {
       return { success: false, action: "reply_to_comment", message: "Rate limited — cannot comment yet" };
     }
@@ -432,33 +481,39 @@ export class AgentV2 {
     }
 
     // Pass commentId as parentId for threaded reply
-    await this.moltbookAgent.comment(decision.postId, decision.content, decision.commentId);
+    await (await this.moltbookAgent.comment(decision.postId, decision.content, decision.commentId)).unwrap();
 
     this.memory.totalComments++;
     this.memory.commentsToday++;
     this.memory.lastCommentAt = Date.now();
 
-    // Mark notifications as read for the post we replied on (best effort)
-    try {
-      await this.moltbookAgent.markNotificationsRead(decision.postId);
-    } catch { /* best effort */ }
+    // Track this comment ID so we never reply to it again
+    this.memory.repliedCommentIds.add(decision.commentId);
 
-    return { success: true, action: "reply_to_comment", message: `Replied to comment ${decision.commentId} on post ${decision.postId}`, karmaDelta: 1 };
+    // Mark notifications as read for the post we replied on (best effort)
+    this.moltbookAgent.markNotificationsRead(decision.postId);
+
+    return {
+      success: true,
+      action: "reply_to_comment",
+      message: `Replied to comment ${decision.commentId} on post ${decision.postId}`,
+      karmaDelta: 1,
+    };
   }
 
   private async executeUpvote(decision: Extract<AgentDecision, { action: "upvote" }>): Promise<ExecutionResult> {
-    await this.moltbookAgent.vote(decision.postId, "up");
+    await (await this.moltbookAgent.vote(decision.postId, "up")).unwrap();
     this.memory.totalUpvotes++;
     return { success: true, action: "upvote", message: `Upvoted ${decision.postId}` };
   }
 
   private async executeDownvote(decision: Extract<AgentDecision, { action: "downvote" }>): Promise<ExecutionResult> {
-    await this.moltbookAgent.vote(decision.postId, "down");
+    await (await this.moltbookAgent.vote(decision.postId, "down")).unwrap();
     return { success: true, action: "downvote", message: `Downvoted ${decision.postId}` };
   }
 
   private async executeFollow(decision: Extract<AgentDecision, { action: "follow" }>): Promise<ExecutionResult> {
-    await this.moltbookAgent.follow(decision.agentName);
+    await (await this.moltbookAgent.follow(decision.agentName)).unwrap();
     return { success: true, action: "follow", message: `Followed ${decision.agentName}` };
   }
 
@@ -466,15 +521,15 @@ export class AgentV2 {
 
   private async fetchFeed(): Promise<FeedPost[]> {
     try {
-      const { posts } = await this.moltbookAgent.getFeed({ sort: "hot", limit: 15 });
-      return posts.map((p: any) => ({
+      const { posts } = (await this.moltbookAgent.getFeed({ sort: "hot", limit: 15 })).unwrap();
+      return posts.map((p) => ({
         id: p.id,
         title: p.title,
         content: p.content,
         submolt: p.submolt,
         author: p.author,
-        upvotes: p.votes ?? p.upvotes ?? 0,
-        comment_count: p.commentCount ?? p.comment_count ?? 0,
+        upvotes: p.votes,
+        comment_count: p.commentCount,
         createdAt: p.createdAt,
       }));
     } catch {
@@ -484,13 +539,18 @@ export class AgentV2 {
 
   /** Fetch home dashboard — single API call for all context */
   private async fetchHome(): Promise<{
-    activity: Array<{ post_id: string; post_title: string; new_notification_count: number; latest_commenters: string[] }>;
+    activity: Array<{
+      post_id: string;
+      post_title: string;
+      new_notification_count: number;
+      latest_commenters: string[];
+    }>;
     followingFeed: FeedPost[];
     unreadCount: number;
     whatToDo: string[];
   }> {
     try {
-      const home = await this.moltbookAgent.getHome();
+      const home = (await this.moltbookAgent.getHome()).unwrap();
       return {
         activity: home.activity_on_your_posts ?? [],
         followingFeed: (home.posts_from_accounts_you_follow?.posts ?? []).map((p) => ({
@@ -511,17 +571,48 @@ export class AgentV2 {
     }
   }
 
+  /** Fetch posts relevant to agent's recent topics via semantic search */
+  private async fetchRelevantPosts(): Promise<FeedPost[]> {
+    try {
+      // Build search query from recent post topics
+      const recentTopics = this.memory.topicsSeen
+        .slice(-5)
+        .map((t) => t.topic)
+        .join(" ");
+      if (!recentTopics) return [];
+
+      const { results } = (
+        await this.moltbookAgent.search(recentTopics, {
+          type: "posts",
+          limit: 10,
+        })
+      ).unwrap();
+
+      // Deduplicate against already-fetched feed
+      return (results ?? []).map((r) => ({
+        id: r.id,
+        title: r.title ?? "",
+        content: r.content ?? "",
+        submolt: "",
+        author: r.author?.name ?? "",
+        upvotes: 0,
+        comment_count: 0,
+        createdAt: "",
+      }));
+    } catch {
+      return [];
+    }
+  }
+
   private async fetchNotifications(): Promise<NotificationItem[]> {
     try {
-      const { notifications } = await this.moltbookAgent.getNotifications({ limit: 15 });
-      return notifications.map((n: any) => ({
+      const { notifications } = (await this.moltbookAgent.getNotifications({ limit: 15 })).unwrap();
+      return notifications.map((n) => ({
         type: n.type,
-        message: n.content ?? n.message,
+        message: n.message,
         agentName: n.agent_name,
-        postId: n.relatedPostId ?? n.post_id,
-        commentId: n.relatedCommentId ?? n.comment_id,
-        commentContent: n.comment?.content,
-        createdAt: n.createdAt ?? n.created_at,
+        postId: n.post_id,
+        createdAt: n.created_at,
       }));
     } catch {
       return [];

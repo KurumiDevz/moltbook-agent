@@ -7,6 +7,8 @@ export { Gateway, createGateway } from "./gateway.js";
 export { GeminiProvider, createGeminiProvider } from "./gemini-provider.js";
 export { MoltbookAgent, createMoltbookAgent, createMoltbookSDK } from "./moltbook.js";
 export { Brain, createBrain, BUILT_IN_SKILLS } from "./brain/index.js";
+export { ok, err, tryCatch, tryAsync } from "./result.js";
+export { MoltbookApiError } from "./errors.js";
 
 // V2 exports
 export { AgentV2 } from "./agent-v2.js";
@@ -25,6 +27,7 @@ export {
   cleanupOldSessions,
 } from "./session-manager.js";
 
+export type { Result } from "./result.js";
 export type {
   Provider,
   ProviderType,
@@ -37,17 +40,8 @@ export type {
 
 export type { GatewayConfig } from "./gateway.js";
 export type { GeminiProviderConfig } from "./gemini-provider.js";
-export type {
-  MoltbookConfig,
-  MoltbookSDKConfig,
-  PostOptions,
-  PostResponse,
-  Post,
-  Comment,
-  AgentProfile,
-  Submolt,
-  HomeData,
-} from "./moltbook.js";
+export type { MoltbookConfig, MoltbookSDKConfig, PostOptions, PostResponse } from "./moltbook.js";
+export type { Post, Comment, AgentProfile, Submolt, HomeData } from "./types.js";
 export type { PostType, Persona, Skill, ContentChunks, BrainConfig, RateState } from "./brain/index.js";
 
 // V2 types
