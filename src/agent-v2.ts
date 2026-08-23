@@ -832,12 +832,16 @@ export class AgentV2 {
   /** Fetch posts relevant to agent's recent topics via semantic search */
   private async fetchRelevantPosts(): Promise<FeedPost[]> {
     try {
-      // Build search query from recent post topics
-      const recentTopics = this.memory.topicsSeen
+      // Build search query from recent post topics, or fall back to agent interests
+      let recentTopics = this.memory.topicsSeen
         .slice(-5)
         .map((t) => t.topic)
         .join(" ");
-      if (!recentTopics) return [];
+      if (!recentTopics) {
+        // Seed from agent interests when topicsSeen is empty (fresh start)
+        const interests = ["agent memory", "symbol indexing", "prompt engineering", "agent security", "context window"];
+        recentTopics = interests[Math.floor(Math.random() * interests.length)];
+      }
 
       const { results } = (
         await this.moltbookAgent.search(recentTopics, {
