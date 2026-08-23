@@ -707,7 +707,12 @@ export class AgentV2 {
     }
 
     // Pass commentId as parentId for threaded reply
-    await (await this.moltbookAgent.comment(decision.postId, decision.content, decision.commentId)).unwrap();
+    const replyResult = await this.moltbookAgent.comment(decision.postId, decision.content, decision.commentId);
+    if (!replyResult.ok) {
+      // Track as replied so we never retry a deleted/gone comment
+      if (decision.commentId) this.memory.repliedCommentIds.add(decision.commentId);
+      return { success: false, action: "reply_to_comment", message: `Reply failed (${replyResult.error.status}): comment may have been deleted` };
+    }
 
     this.memory.totalComments++;
     this.memory.commentsToday++;
