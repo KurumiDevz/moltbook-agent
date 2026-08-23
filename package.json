@@ -13,8 +13,8 @@
     "register": "tsx --env-file=.env examples/register.ts",
     "post": "tsx --env-file=.env examples/post.ts",
     "scheduled": "tsx --env-file=.env examples/scheduled.ts",
-    "agent": "tsx --env-file=.env src/agent/cli.ts",
-    "agent:dry": "tsx --env-file=.env src/agent/cli.ts --dry-run",
+    "agent": "tsx --env-file=.env src/cli.ts",
+    "agent:dry": "tsx --env-file=.env src/cli.ts --dry-run",
     "test": "node --import tsx/esm --test tests/**/*.test.ts",
     "postinstall": "node scripts/shim-undici.mjs"
   },
