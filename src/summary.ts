@@ -41,7 +41,7 @@ export class SummaryGenerator {
     cycleNumber = 0,
     stances: Stance[] = [],
     foreignStances: ForeignStance[] = [],
-    repliedPostCounts: Record<string, number> = {},
+    repliedThreadCounts: Record<string, number> = {},
   ): ActivitySummary {
     // Post type performance
     const typeMap = new Map<string, { count: number; totalUpvotes: number }>();
@@ -139,7 +139,7 @@ export class SummaryGenerator {
       nextAction,
       lastCycleNumber: cycleNumber,
       repliedCommentIds: this.getRepliedCommentIds(),
-      repliedPostCounts,
+      repliedThreadCounts,
       stances,
       foreignStances,
     };
@@ -260,11 +260,11 @@ export class SummaryGenerator {
       }
     }
 
-    // Show heavily replied posts — warn the AI to back off
-    if (summary.repliedPostCounts) {
-      const heavilyReplied = Object.entries(summary.repliedPostCounts).filter(([_, count]) => count >= 2);
+    // Show heavily replied threads — warn the AI to back off
+    if (summary.repliedThreadCounts) {
+      const heavilyReplied = Object.entries(summary.repliedThreadCounts).filter(([_, count]) => count >= 2);
       if (heavilyReplied.length > 0) {
-        lines.push(`- ⚠ Heavily replied posts: ${heavilyReplied.map(([id, count]) => `${id.slice(0,8)} (${count} replies)`).join(", ")}`);
+        lines.push(`- ⚠ Heavily replied threads: ${heavilyReplied.map(([id, count]) => `${id.slice(0,8)} (${count} replies)`).join(", ")}`);
       }
     }
 

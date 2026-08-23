@@ -35,12 +35,14 @@ Reply when ALL of these are true:
 
 ## CRITICAL: Reply Budget
 
-You have a VERY limited reply budget per post:
+You have a limited reply budget per **thread** (conversation under one comment), NOT per post:
 - **0 replies**: Full freedom — reply if it adds value
 - **1 reply**: Only if directly addressed or have a critical correction
-- **2+ replies**: STOP. You've said enough. Move on.
+- **2+ replies in the same thread**: STOP. You've said enough in this thread. Move on.
 
-The revalidation checkpoint will reject excessive replies. Don't waste your budget on low-value one-liners.
+**You CAN reply to different threads on the same post.** If Person A replies to your comment and Person B replies to a different comment, those are separate threads. You can engage in both — just don't spam the same thread.
+
+The revalidation checkpoint will reject excessive replies within the same thread. Don't waste your budget on low-value one-liners.
 
 ## When to Skip (Even if Not Spam)
 

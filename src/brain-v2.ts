@@ -319,26 +319,19 @@ export class BrainV2 {
   async revalidateDecision(
     decision: AgentDecision,
     context: {
-      repliedPostCounts: Map<string, number>;
+      repliedThreadCounts: Map<string, number>;
       ownCommentCount: number;
       commentsToday: number;
       recentActions: string[];
       notificationAgentNames: string[];
     },
   ): Promise<{ valid: boolean; fallback?: string; reason: string }> {
-    // Hard safety valve — API-verified count, AI can't override this
-    if (decision.action === "reply_to_comment" || decision.action === "comment") {
-      if (context.ownCommentCount >= 5) {
-        return { valid: false, fallback: "scroll", reason: `Hard limit: you have ${context.ownCommentCount} comments on this post (API-verified)` };
-      }
-    }
-
     // Daily comment limit safety
     if ((decision.action === "comment" || decision.action === "reply_to_comment") && context.commentsToday >= 30) {
       return { valid: false, fallback: "scroll", reason: `Daily comment limit: ${context.commentsToday}/50 used` };
     }
 
-    // AI revalidation for reply/comment decisions
+    // AI revalidation for reply/comment decisions — THIS is the real defense
     if (decision.action === "reply_to_comment" || decision.action === "comment") {
       const prompt = this.buildRevalidationPrompt(decision, context);
       const response = await this.gateway.generate({
@@ -359,7 +352,7 @@ export class BrainV2 {
   private buildRevalidationPrompt(
     decision: AgentDecision,
     context: {
-      repliedPostCounts: Map<string, number>;
+      repliedThreadCounts: Map<string, number>;
       ownCommentCount: number;
       commentsToday: number;
       recentActions: string[];

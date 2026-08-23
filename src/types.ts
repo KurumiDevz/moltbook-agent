@@ -292,8 +292,8 @@ export type ActivitySummary = {
   lastCycleNumber: number;
   /** Comment IDs the agent has already replied to — prevents double-replies */
   repliedCommentIds: string[];
-  /** Per-post reply counts — survives restarts */
-  repliedPostCounts: Record<string, number>;
+  /** Per-thread reply counts — keyed by parent comment ID (thread root), survives restarts */
+  repliedThreadCounts: Record<string, number>;
   /** Stances the agent has taken — positions it can reference in debates */
   stances: Stance[];
   /** Stances other agents have taken — positions nimjiagent can reference in debates */

@@ -64,8 +64,8 @@ type MemoryState = {
   taskQueue: TaskQueueItem[];
   /** Comment IDs we've already replied to — prevents double-replies */
   repliedCommentIds: Set<string>;
-  /** Per-post reply count — enforces stochastic cap */
-  repliedPostCounts: Map<string, number>;
+  /** Per-thread reply count — keyed by parent comment ID (thread root) */
+  repliedThreadCounts: Map<string, number>;
   /** Stances the agent has taken — positions it can reference in debates */
   stances: Stance[];
   /** Stances other agents have taken — positions nimjiagent can reference in debates */
@@ -118,9 +118,9 @@ export class AgentV2 {
         ? [...(existingSummary.completedTasks ?? []), ...(existingSummary.pendingTasks ?? [])]
         : [],
       repliedCommentIds: new Set(existingSummary?.repliedCommentIds ?? []),
-      repliedPostCounts: new Map<string, number>(
-        existingSummary?.repliedPostCounts
-          ? Object.entries(existingSummary.repliedPostCounts)
+      repliedThreadCounts: new Map<string, number>(
+        existingSummary?.repliedThreadCounts
+          ? Object.entries(existingSummary.repliedThreadCounts)
           : [],
       ),
       stances: existingSummary?.stances ?? [],
@@ -145,6 +145,9 @@ export class AgentV2 {
     console.log("🚀 Agent V2 started — prompt-driven mode");
     console.log(`   Submolts: ${this.submolts.join(", ")}`);
 
+    // Hydrate reply counts from API before first cycle
+    await this.hydrateReplyCounts();
+
     while (this.running) {
       try {
         await this.cycle();
@@ -152,6 +155,46 @@ export class AgentV2 {
         console.error("💥 Cycle error:", err);
       }
       await this.sleep(30_000 + Math.random() * 90_000);
+    }
+  }
+
+  /** Hydrate repliedThreadCounts from API on startup so revalidation has accurate data. */
+  private async hydrateReplyCounts(): Promise<void> {
+    console.log("🔄 Hydrating reply counts from API...");
+    try {
+      const home = await this.moltbookAgent.getHome();
+      if (!home.ok) {
+        console.log("   ⚠ Could not fetch home for hydration");
+        return;
+      }
+      const homeData = home.value as any;
+      const activityPosts = homeData.activity_on_your_posts ?? [];
+
+      for (const a of activityPosts) {
+        const postId = a.post_id;
+        if (!postId) continue;
+        const commentsResult = await this.moltbookAgent.listComments(postId, { sort: "old", limit: 100 });
+        if (commentsResult.ok) {
+          const comments = (commentsResult.value as any).comments ?? [];
+          // Count our comments per parent comment (thread)
+          for (const c of comments) {
+            if (c.author?.name === "nimjiagent-sz945r") {
+              // Thread key = parentId (reply thread) or comment's own ID (top-level)
+              const threadKey = c.parentId ?? c.id;
+              const current = this.memory.repliedThreadCounts.get(threadKey) ?? 0;
+              this.memory.repliedThreadCounts.set(threadKey, current + 1);
+            }
+          }
+        }
+      }
+      const hydrated = [...this.memory.repliedThreadCounts.entries()].filter(([, c]) => c > 0);
+      if (hydrated.length > 0) {
+        console.log(`   Hydrated ${hydrated.length} threads: ${hydrated.map(([id, c]) => `${id.slice(0, 8)}...(${c})`).join(", ")}`);
+      } else {
+        console.log("   No existing replies found");
+      }
+    } catch (err) {
+      console.log(`   ⚠ Hydration failed: ${err instanceof Error ? err.message : err}`);
     }
   }
 
@@ -174,15 +217,16 @@ export class AgentV2 {
     const rateLimits = this.getRateLimits();
     const home = await this.fetchHome();
 
-    // Filter out: already-replied, self-notifications, and probabilistic per-post cap
+    // Filter out: already-replied, self-notifications, and probabilistic per-thread cap
     const notifications = allNotifications.filter((n) => {
       if (n.commentId && this.memory.repliedCommentIds.has(n.commentId)) {
         return false; // already replied
       }
-      // Stochastic per-post cap: 1st=100%, 2nd=70%, 3rd=40%, 4th=15%, 5th+=0%
-      // Lets the AI decide naturally while preventing infinite chains
-      if (n.postId) {
-        const count = this.memory.repliedPostCounts.get(n.postId) ?? 0;
+      // Stochastic per-thread cap: 1st=100%, 2nd=70%, 3rd=40%, 4th=15%, 5th+=0%
+      // Thread key = parent comment (reply thread) or comment itself (top-level)
+      if (n.commentId) {
+        const threadKey = n.commentId; // the comment being replied to is the thread root
+        const count = this.memory.repliedThreadCounts.get(threadKey) ?? 0;
         const chances = [1.0, 0.7, 0.4, 0.15, 0];
         const chance = chances[Math.min(count, 4)];
         if (Math.random() > chance) {
@@ -194,6 +238,13 @@ export class AgentV2 {
     const filteredCount = allNotifications.length - notifications.length;
     if (filteredCount > 0) {
       console.log(`   Filtered ${filteredCount} already-replied/self/over-posted notifications`);
+    }
+
+    // Mark all notifications as read so phantom/dead ones clear out
+    try {
+      await this.moltbookAgent.markNotificationsRead();
+    } catch {
+      // Non-critical — just means unread count won't decrease
     }
 
     // Merge hot feed + semantic search results (deduplicate by id)
@@ -314,16 +365,16 @@ export class AgentV2 {
           const comments = (commentsResult.value as any).comments ?? [];
           ownCommentCount = comments.filter((c: any) => c.author?.name === "nimjiagent-sz945r").length;
           // Sync in-memory count with reality
-          this.memory.repliedPostCounts.set(decision.postId, ownCommentCount);
+          this.memory.repliedThreadCounts.set(decision.postId, ownCommentCount);
         }
       } catch {
         // API failed — fall back to in-memory count
-        ownCommentCount = this.memory.repliedPostCounts.get(decision.postId) ?? 0;
+        ownCommentCount = this.memory.repliedThreadCounts.get(decision.postId) ?? 0;
       }
     }
 
     const revalidation = await this.brain.revalidateDecision(decision, {
-      repliedPostCounts: this.memory.repliedPostCounts,
+      repliedThreadCounts: this.memory.repliedThreadCounts,
       ownCommentCount,
       commentsToday: this.memory.commentsToday,
       recentActions: this.memory.taskQueue.slice(-5).map((t) => `${t.type}: ${t.description}`),
@@ -620,9 +671,9 @@ export class AgentV2 {
     // Track this comment ID so we never reply to it again
     this.memory.repliedCommentIds.add(decision.commentId);
 
-    // Track per-post reply count for stochastic cap
-    const postCount = this.memory.repliedPostCounts.get(decision.postId) ?? 0;
-    this.memory.repliedPostCounts.set(decision.postId, postCount + 1);
+    // Track per-thread reply count (keyed by the comment we replied to)
+    const threadCount = this.memory.repliedThreadCounts.get(decision.commentId) ?? 0;
+    this.memory.repliedThreadCounts.set(decision.commentId, threadCount + 1);
 
     // Mark notifications as read for the post we replied on (best effort)
     try {
