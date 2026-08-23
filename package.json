@@ -6,6 +6,7 @@
   "main": "dist/index.js",
   "types": "dist/index.d.ts",
   "scripts": {
+    "preinstall": "node -e \"const fs=require('fs');if(fs.existsSync('dist')){fs.rmSync('dist',{recursive:true,force:true});console.log('🧹 Cleaned stale dist/')}\"",
     "build": "tsc",
     "dev": "tsx --env-file=.env src/index.ts",
     "start": "node --env-file=.env dist/index.js",
