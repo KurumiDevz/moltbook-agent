@@ -14,7 +14,7 @@ export function initHttp() {
   setGlobalDispatcher(new Agent({
     keepAliveTimeout: 30_000,
     keepAliveMaxTimeout: 60_000,
-    connect: { timeout: 10_000 },
+    connect: { timeout: 30_000 },
   }));
 }
 
@@ -26,6 +26,8 @@ export type HttpRequestOptions = {
   body?: unknown;
   /** Timeout in ms (default 30000) */
   timeout?: number;
+  /** Max retries on connection/timeout errors (default 2) */
+  retries?: number;
 };
 
 export type HttpResponse<T = unknown> = {
@@ -34,8 +36,11 @@ export type HttpResponse<T = unknown> = {
   data: T;
 };
 
+/** Sleep for ms */
+const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
+
 /**
- * Make an HTTP request through undici.
+ * Make an HTTP request through undici with retry.
  * Automatically initializes the dispatcher on first call.
  */
 export async function http<T = unknown>(
@@ -44,30 +49,47 @@ export async function http<T = unknown>(
 ): Promise<HttpResponse<T>> {
   initHttp();
 
-  const { method = "GET", headers = {}, body, timeout = 30_000 } = options;
+  const { method = "GET", headers = {}, body, timeout = 30_000, retries = 2 } = options;
+  const ua = headers["user-agent"] ?? "moltbook-agent/1.0";
 
-  const response = await undiciRequest(url, {
-    method,
-    headers: {
-      "user-agent": "moltbook-agent/1.0",
-      ...headers,
-    },
-    body: body ? JSON.stringify(body) : undefined,
-    signal: AbortSignal.timeout(timeout),
-  });
+  let lastError: unknown;
+  for (let attempt = 0; attempt <= retries; attempt++) {
+    try {
+      const response = await undiciRequest(url, {
+        method,
+        headers: { "user-agent": ua, ...headers },
+        body: body ? JSON.stringify(body) : undefined,
+        signal: AbortSignal.timeout(timeout),
+      });
 
-  const contentType = response.headers["content-type"] ?? "";
-  let data: unknown;
-  if (contentType.includes("application/json")) {
-    data = await response.body.json();
-  } else {
-    const text = await response.body.text();
-    try { data = JSON.parse(text); } catch { data = text; }
+      const contentType = response.headers["content-type"] ?? "";
+      let data: unknown;
+      if (contentType.includes("application/json")) {
+        data = await response.body.json();
+      } else {
+        const text = await response.body.text();
+        try { data = JSON.parse(text); } catch { data = text; }
+      }
+
+      return {
+        status: response.statusCode,
+        headers: Object.fromEntries(Object.entries(response.headers).filter(([k]) => typeof k === "string") as [string, string][]),
+        data: data as T,
+      };
+    } catch (err: any) {
+      lastError = err;
+      const isRetryable =
+        err?.code === "UND_ERR_CONNECT_TIMEOUT" ||
+        err?.code === "UND_ERR_HEADERS_TIMEOUT" ||
+        err?.code === "UND_ERR_BODY_TIMEOUT" ||
+        err?.name === "TimeoutError" ||
+        err?.name === "AbortError";
+      if (isRetryable && attempt < retries) {
+        await sleep(1000 * (attempt + 1));
+        continue;
+      }
+      throw err;
+    }
   }
-
-  return {
-    status: response.statusCode,
-    headers: Object.fromEntries(Object.entries(response.headers).filter(([k]) => typeof k === "string") as [string, string][]),
-    data: data as T,
-  };
+  throw lastError;
 }
