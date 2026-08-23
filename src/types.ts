@@ -15,6 +15,18 @@ export type Submolt = {
   description: string;
   subscriber_count: number;
   created_at: string;
+  created_by?: {
+    id: string;
+    name: string;
+    description: string;
+    karma: number;
+    follower_count: number;
+    following_count: number;
+  };
+  created_at_ts?: number;
+  is_nsfw?: boolean;
+  is_private?: boolean;
+  post_count?: number;
 };
 
 /** Post data from the API */
@@ -28,7 +40,25 @@ export type Post = {
   comment_count: number;
   created_at: string;
   submolt: { id: string; name: string; display_name: string };
-  author: { id: string; name: string; karma?: number };
+  author: {
+    id: string;
+    name: string;
+    karma?: number;
+    avatar_url?: string;
+    description?: string;
+    follower_count?: number;
+    following_count?: number;
+    is_claimed?: boolean;
+    is_active?: boolean;
+  };
+  type?: string;
+  score?: number;
+  hot_score?: number;
+  is_pinned?: boolean;
+  is_locked?: boolean;
+  is_deleted?: boolean;
+  verification_status?: string;
+  is_spam?: boolean;
 };
 
 /** Comment data from the API */
@@ -56,6 +86,12 @@ export type AgentProfile = {
   follower_count: number;
   following_count: number;
   avatar_url?: string;
+  display_name?: string;
+  posts_count?: number;
+  comments_count?: number;
+  is_verified?: boolean;
+  claimed_by?: string;
+  labels?: { pinned: any[]; inline: any[]; metadata: any[] };
   owner?: {
     x_handle: string;
     x_name: string;
@@ -65,6 +101,18 @@ export type AgentProfile = {
     x_following_count: number;
     x_verified: boolean;
   };
+};
+
+/** Post from accounts you follow (different shape than full Post) */
+export type FollowingPost = {
+  post_id: string;
+  title: string;
+  content_preview: string;
+  submolt_name: string;
+  author_name: string;
+  upvotes: number;
+  comment_count: number;
+  created_at: string;
 };
 
 /** Home dashboard response from /api/v1/home */
@@ -82,28 +130,22 @@ export type HomeData = {
     latest_at: string;
     latest_commenters: string[];
     preview: string;
+    suggested_actions: string[];
   }>;
   latest_moltbook_announcement?: {
     post_id: string;
     title: string;
     preview: string;
+    author_name: string;
+    created_at: string;
   };
   posts_from_accounts_you_follow: {
-    posts: Post[];
+    posts: FollowingPost[];
     total_following: number;
+    see_more: string;
+    hint: string;
   };
   what_to_do_next: string[];
-};
-
-/** Notification from the API */
-export type Notification = {
-  id: string;
-  type: string;
-  message: string;
-  post_id?: string;
-  agent_name?: string;
-  created_at: string;
-  read: boolean;
 };
 
 /** Semantic search result from /api/v1/search */
@@ -112,13 +154,15 @@ export type SearchResult = {
   type: "post" | "comment";
   title?: string;
   content: string;
-  similarity: number;
+  relevance: number;
   author: { id: string; name: string };
   post_id?: string;
   upvotes?: number;
   comment_count?: number;
   created_at?: string;
-  submolt?: { id: string; name: string; display_name: string };
+  submolt?: { id: string; name: string; display_name: string } | null;
+  url?: string;
+  post?: { id: string; title: string } | null;
 };
 
 // ── Agent internal types ──────────────────────────────────────────────

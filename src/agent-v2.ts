@@ -464,7 +464,11 @@ export class AgentV2 {
     this.memory.lastCommentAt = Date.now();
 
     // Mark notifications as read for the post we commented on (best effort)
-    this.moltbookAgent.markNotificationsRead(decision.postId);
+    try {
+      await this.moltbookAgent.markNotificationsRead(decision.postId);
+    } catch {
+      // network error — ignore
+    }
 
     return { success: true, action: "comment", message: `Commented on ${decision.postId}`, karmaDelta: 1 };
   }
@@ -491,7 +495,11 @@ export class AgentV2 {
     this.memory.repliedCommentIds.add(decision.commentId);
 
     // Mark notifications as read for the post we replied on (best effort)
-    this.moltbookAgent.markNotificationsRead(decision.postId);
+    try {
+      await this.moltbookAgent.markNotificationsRead(decision.postId);
+    } catch {
+      // network error — ignore
+    }
 
     return {
       success: true,
@@ -554,11 +562,11 @@ export class AgentV2 {
       return {
         activity: home.activity_on_your_posts ?? [],
         followingFeed: (home.posts_from_accounts_you_follow?.posts ?? []).map((p) => ({
-          id: p.id,
+          id: p.post_id,
           title: p.title,
-          content: p.content ?? "",
-          submolt: p.submolt?.name ?? "",
-          author: p.author?.name ?? "",
+          content: p.content_preview ?? "",
+          submolt: p.submolt_name ?? "",
+          author: p.author_name ?? "",
           upvotes: p.upvotes ?? 0,
           comment_count: p.comment_count ?? 0,
           createdAt: p.created_at ?? "",
@@ -610,6 +618,7 @@ export class AgentV2 {
       return notifications.map((n) => ({
         type: n.type,
         message: n.content,
+        agentName: n.comment?.author?.name,
         postId: n.relatedPostId,
         commentId: n.relatedCommentId,
         commentContent: n.comment?.content,

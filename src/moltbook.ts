@@ -6,7 +6,7 @@
 import type { Gateway } from "./gateway.js";
 import type { GenerateRequest } from "./provider.js";
 import { http } from "./http.js";
-import type { Post, Comment, AgentProfile, Submolt, HomeData } from "./types.js";
+import type { Post, Comment, AgentProfile, Submolt, HomeData, FollowingPost } from "./types.js";
 import { ok, err, type Result } from "./result.js";
 import { MoltbookApiError } from "./errors.js";
 
@@ -564,34 +564,16 @@ Output only the post content, no meta-commentary.`;
     const account = (resp.your_account ?? {}) as Record<string, unknown>;
     const followFeed = (resp.posts_from_accounts_you_follow ?? {}) as Record<string, unknown>;
     const rawFollowingPosts = (followFeed.posts ?? []) as Array<Record<string, unknown>>;
-    const followingFeed: Post[] = rawFollowingPosts.map((p) => {
-      const author = p.author as Record<string, unknown> | undefined;
-      const submolt = p.submolt as Record<string, unknown> | undefined;
-      return {
-        id: (p.id ?? "") as string,
-        title: (p.title ?? "") as string,
-        content: (p.content ?? "") as string,
-        url: (p.url ?? "") as string,
-        upvotes: (p.upvotes as number) ?? 0,
-        downvotes: (p.downvotes as number) ?? 0,
-        comment_count: (p.comment_count as number) ?? 0,
-        created_at: (p.created_at ?? "") as string,
-        submolt: submolt
-          ? {
-              id: (submolt.id ?? "") as string,
-              name: (submolt.name ?? "") as string,
-              display_name: (submolt.display_name ?? submolt.name ?? "") as string,
-            }
-          : { id: "", name: "", display_name: "" },
-        author: author
-          ? {
-              id: (author.id ?? "") as string,
-              name: (author.name ?? "") as string,
-              karma: author.karma as number | undefined,
-            }
-          : { id: "", name: "", karma: undefined },
-      };
-    });
+    const followingFeed: FollowingPost[] = rawFollowingPosts.map((p) => ({
+      post_id: (p.post_id ?? "") as string,
+      title: (p.title ?? "") as string,
+      content_preview: (p.content_preview ?? "") as string,
+      submolt_name: (p.submolt_name ?? "") as string,
+      author_name: (p.author_name ?? "") as string,
+      upvotes: (p.upvotes as number) ?? 0,
+      comment_count: (p.comment_count as number) ?? 0,
+      created_at: (p.created_at ?? "") as string,
+    }));
 
     const rawActivity = (resp.activity_on_your_posts ?? []) as Array<Record<string, unknown>>;
     const activityOnYourPosts = rawActivity.map((a) => ({
@@ -602,6 +584,7 @@ Output only the post content, no meta-commentary.`;
       latest_at: (a.latest_at ?? "") as string,
       latest_commenters: (a.latest_commenters as string[]) ?? [],
       preview: (a.preview ?? "") as string,
+      suggested_actions: (a.suggested_actions as string[]) ?? [],
     }));
 
     const announcement = resp.latest_moltbook_announcement as Record<string, unknown> | undefined;
@@ -619,12 +602,16 @@ Output only the post content, no meta-commentary.`;
         ? {
             post_id: (announcement.post_id ?? "") as string,
             title: (announcement.title ?? "") as string,
+            author_name: (announcement.author_name ?? "") as string,
+            created_at: (announcement.created_at ?? "") as string,
             preview: (announcement.preview ?? "") as string,
           }
         : undefined,
       posts_from_accounts_you_follow: {
         posts: followingFeed,
         total_following: (followFeed.total_following as number) ?? 0,
+        see_more: (followFeed.see_more as string) ?? "",
+        hint: (followFeed.hint as string) ?? "",
       },
       what_to_do_next: whatToDoNext,
     });
@@ -767,7 +754,13 @@ Output only the post content, no meta-commentary.`;
           content: string;
           relatedPostId?: string;
           relatedCommentId?: string;
-          comment?: { id: string; content: string; postId: string; parentId?: string };
+          comment?: {
+            id: string;
+            content: string;
+            postId: string;
+            parentId?: string;
+            author?: { id: string; name: string; karma?: number };
+          };
           isRead: boolean;
           createdAt: string;
         }>;
