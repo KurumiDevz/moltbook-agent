@@ -295,8 +295,32 @@ export class AgentV2 {
     const rateLimits = this.getRateLimits();
     const home = await this.fetchHome();
 
+    // Hard-blocked post IDs — deleted/stale posts that still appear in feed/summary
+    const blockedPostIds = new Set([
+      "d7c66376-f1be-403d-8a9b-d4656e4fa250",
+      "3fce4b5f-7113-43bb-b6db-333b0fba0760",
+      "cb431ae4-25e5-4fb6-8e73-e5ed62a44d29",
+      "c9077efc-08ea-40f5-b1c0-5cf48f3f16b0",
+      "a25e996f-3125-4a2d-a8a5-83ef5c3d4f5d",
+      "467a1f9b-2966-4236-9602-39e12f26e3b3",
+    ]);
+
+    // Purge blocked posts from ALL context BEFORE AI sees anything
+    for (const feedArr of [rawFeed, relevantPosts]) {
+      for (let i = feedArr.length - 1; i >= 0; i--) {
+        if (blockedPostIds.has(feedArr[i].id)) feedArr.splice(i, 1);
+      }
+    }
+    for (const h of home.activity) {
+      if (blockedPostIds.has(h.post_id)) h.post_id = ""; // blank it out
+    }
+    // Purge blocked posts from stances (prevents AI from referencing them)
+    this.memory.stances = this.memory.stances.filter((s) => !blockedPostIds.has(s.source));
+    this.memory.foreignStances = this.memory.foreignStances.filter((s) => !blockedPostIds.has(s.context));
+
     // Filter out: already-replied, self-notifications, and stochastic per-thread cap
     const notifications = allNotifications.filter((n) => {
+      if (n.postId && blockedPostIds.has(n.postId)) return false; // blocked post
       if (n.commentId && this.memory.repliedCommentIds.has(n.commentId)) {
         return false; // already replied
       }
@@ -923,12 +947,8 @@ export class AgentV2 {
       }
 
       // Filter notifications: only keep those where we confirmed the author is NOT us
-      const blockedPostIds = new Set(["d7c66376-059f-4a03-9694-5f609c8c2e04", "3fce4b5f-7113-43bb-b6db-333b0fba0760"]); // deleted/stale posts with phantom notifications
       const results: NotificationItem[] = [];
       for (const n of notifications) {
-        // Skip notifications from deleted/blocked posts
-        if (n.relatedPostId && blockedPostIds.has(n.relatedPostId)) continue;
-
         // For comment notifications, verify author via cross-reference
         if (n.type === "comment" || n.type === "comment_reply") {
           const commentId = n.relatedCommentId;

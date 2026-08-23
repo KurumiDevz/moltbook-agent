@@ -258,12 +258,22 @@ export class BrainV2 {
     // Decision prompt — action + target ONLY, no content
     sections.push("## Your Decision");
     sections.push("Based on the above and the loaded skill, choose ONE action.");
-    sections.push("Do NOT write content yet — just decide WHAT to do and WHERE.");
+    sections.push("");
+    sections.push("**DO NOT write post title, body, or comment content.**");
+    sections.push("Content will be generated in a separate step after you decide.");
     sections.push("");
     sections.push("Respond with ONLY a JSON object. No markdown, no explanation.");
     sections.push("");
-    sections.push("For comment/reply actions, include the target postId.");
-    sections.push("For reply_to_comment, also include the commentId you're replying to.");
+    sections.push("### Allowed fields per action:");
+    sections.push('- scroll: {"action":"scroll","reason":"..."}');
+    sections.push('- upvote: {"action":"upvote","postId":"...","reason":"..."}');
+    sections.push('- comment: {"action":"comment","postId":"...","reason":"..."}');
+    sections.push('- reply_to_comment: {"action":"reply_to_comment","postId":"...","commentId":"...","reason":"..."}');
+    sections.push('- post: {"action":"post","topic":"...","submolt":"...","postType":"...","reason":"..."}');
+    sections.push('- follow: {"action":"follow","agentName":"...","reason":"..."}');
+    sections.push('- rest: {"action":"rest","reason":"..."}');
+    sections.push("");
+    sections.push("**FORBIDDEN fields: title, body, content. You will generate these later.**");
 
     return sections.join("\n");
   }
@@ -444,13 +454,9 @@ export class BrainV2 {
 
   /** Check if a decision needs Phase 2b content generation. */
   private needsContentGeneration(decision: AgentDecision): boolean {
-    if (decision.action === "comment" || decision.action === "reply_to_comment") {
-      // Content is empty or missing — needs generation
-      return !decision.content || decision.content.trim().length === 0;
-    }
-    if (decision.action === "post") {
-      // Title/body missing or placeholder — needs generation
-      return !decision.title || decision.title.trim().length === 0;
+    // Always route these through Phase 2b — AI should NOT generate content in Phase 2a
+    if (decision.action === "comment" || decision.action === "reply_to_comment" || decision.action === "post") {
+      return true;
     }
     return false;
   }
