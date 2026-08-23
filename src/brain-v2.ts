@@ -89,7 +89,7 @@ export class BrainV2 {
     feed: FeedPost[];
     notifications: NotificationItem[];
     rateLimits: RateLimitState;
-    postHistory: Array<{ type: string; submolt: string; upvotes: number; timestamp: number }>;
+    postHistory: Array<{ type: string; submolt: string; upvotes: number; timestamp: number; title?: string }>;
     recentInteractions: string[];
     summary?: string;
     stances?: Array<{ topic: string; position: string; context: string; source: string; timestamp: number }>;
@@ -112,9 +112,13 @@ export class BrainV2 {
     if (context.postHistory.length > 0) {
       const recentTypes = context.postHistory.slice(-5).map((p) => p.type);
       const recentSubmolts = context.postHistory.slice(-5).map((p) => p.submolt);
-      sections.push("## Your Recent Posts (avoid repeating)");
-      sections.push(`- Types: ${recentTypes.join(", ")}`);
-      sections.push(`- Submolts: ${recentSubmolts.join(", ")}`);
+      const recentTitles = context.postHistory.slice(-5).map((p) => `- "${p.title}" (${p.type} in /m/${p.submolt})`);
+      sections.push("## Your Recent Posts (DO NOT repeat similar titles/formats)");
+      sections.push(`- Types used: ${recentTypes.join(", ")}`);
+      sections.push(`- Submolts used: ${recentSubmolts.join(", ")}`);
+      sections.push(`- Recent titles:`);
+      for (const t of recentTitles) sections.push(`  ${t}`);
+      sections.push("- Moltbook will flag posts with similar title patterns as spam. VARY your format completely.");
       sections.push("");
     }
 
@@ -185,7 +189,7 @@ export class BrainV2 {
     feed: FeedPost[];
     notifications: NotificationItem[];
     rateLimits: RateLimitState;
-    postHistory: Array<{ type: string; submolt: string; upvotes: number; timestamp: number }>;
+    postHistory: Array<{ type: string; submolt: string; upvotes: number; timestamp: number; title?: string }>;
     recentInteractions: string[];
     summary?: string;
     stances?: Array<{ topic: string; position: string; context: string; source: string; timestamp: number }>;
@@ -219,7 +223,7 @@ export class BrainV2 {
       feed: FeedPost[];
       notifications: NotificationItem[];
       rateLimits: RateLimitState;
-      postHistory: Array<{ type: string; submolt: string; upvotes: number; timestamp: number }>;
+    postHistory: Array<{ type: string; submolt: string; upvotes: number; timestamp: number; title?: string }>;
       recentInteractions: string[];
       summary?: string;
       stances?: Array<{ topic: string; position: string; context: string; source: string; timestamp: number }>;
@@ -262,7 +266,7 @@ export class BrainV2 {
     feed: FeedPost[];
     notifications: NotificationItem[];
     rateLimits: RateLimitState;
-    postHistory: Array<{ type: string; submolt: string; upvotes: number; timestamp: number }>;
+    postHistory: Array<{ type: string; submolt: string; upvotes: number; timestamp: number; title?: string }>;
     recentInteractions: string[];
     summary?: string;
     stances?: Array<{ topic: string; position: string; context: string; source: string; timestamp: number }>;
@@ -287,10 +291,14 @@ export class BrainV2 {
     let decisionPrompt = this.buildDecisionPrompt(context, selectedSkill);
     if (context7Docs) decisionPrompt += context7Docs;
 
+    // Use a fresh conversation for post decisions to avoid repeating title patterns
+    const isPost = selectedSkill?.startsWith("post-") ?? false;
+
     const phase2 = await this.gateway.generate({
       prompt: decisionPrompt,
       model: this.model,
       maxTokens: 2000,
+      ...(isPost ? { conversationKey: "post" } : {}),
     });
 
     const parsed = this.parseDecision(phase2.text);

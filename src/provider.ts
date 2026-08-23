@@ -43,6 +43,8 @@ export type GenerateRequest = {
   readonly stream?: boolean;
   /** Optional image to attach */
   readonly image?: Message["image"];
+  /** Conversation key — different keys = different conversation threads */
+  readonly conversationKey?: string;
 };
 
 /** Response from provider */

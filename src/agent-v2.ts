@@ -106,7 +106,6 @@ export class AgentV2 {
     this.lastSummary = existingSummary;
 
     this.memory = {
-      postHistory: [],
       topicsSeen: [],
       totalPosts: 0,
       totalComments: 0,
@@ -123,6 +122,10 @@ export class AgentV2 {
           ? Object.entries(existingSummary.repliedThreadCounts)
           : [],
       ),
+      postHistory: (existingSummary?.postHistory ?? []).map((p: any) => ({
+        id: p.id, title: p.title, content: p.content, submolt: p.submolt, type: p.type,
+        upvotes: p.upvotes ?? 0, comments: p.comments ?? 0, timestamp: p.timestamp ?? 0,
+      })),
       stances: existingSummary?.stances ?? [],
       foreignStances: existingSummary?.foreignStances ?? [],
     };
@@ -202,6 +205,14 @@ export class AgentV2 {
       /* notification scan failed */
     }
 
+    // 3. Fallback: use persisted postHistory from disk if feed + notifications found nothing
+    if (postIdsToScan.size === 0 && this.memory.postHistory.length > 0) {
+      console.log(`   Feed/notifications empty — using ${this.memory.postHistory.length} persisted posts`);
+      for (const p of this.memory.postHistory) {
+        postIdsToScan.add(p.id);
+      }
+    }
+
     if (postIdsToScan.size === 0) {
       console.log("   No posts found — starting fresh");
       return;
@@ -258,7 +269,6 @@ export class AgentV2 {
     const home = await this.fetchHome();
 
     // Filter out: already-replied, self-notifications, and stochastic per-thread cap
-    // Stochastic keeps it natural — not robotic. But cap is tight to prevent spam.
     const notifications = allNotifications.filter((n) => {
       if (n.commentId && this.memory.repliedCommentIds.has(n.commentId)) {
         return false; // already replied
@@ -457,6 +467,9 @@ export class AgentV2 {
         this.cycleCount,
         this.memory.stances,
         this.memory.foreignStances,
+        Object.fromEntries(this.memory.repliedThreadCounts),
+        [...this.memory.repliedCommentIds],
+        this.memory.postHistory,
       );
       this.summaryGen.save(preExecSummary);
       this.lastSummary = preExecSummary;
@@ -486,7 +499,7 @@ export class AgentV2 {
       this.summaryGen.failTask(this.memory.taskQueue, task.id, result.message);
     }
 
-    // 8. Save summary after each cycle (persist task state + reply counts)
+    // 8. Save summary after each cycle (persist task state + reply counts + post history)
     try {
       const cycleSummary = this.summaryGen.generate(
         this.memory.postHistory,
@@ -498,6 +511,7 @@ export class AgentV2 {
         this.memory.foreignStances,
         Object.fromEntries(this.memory.repliedThreadCounts),
         [...this.memory.repliedCommentIds],
+        this.memory.postHistory,
       );
       this.summaryGen.save(cycleSummary);
       this.lastSummary = cycleSummary;

@@ -43,6 +43,7 @@ export class SummaryGenerator {
     foreignStances: ForeignStance[] = [],
     repliedThreadCounts: Record<string, number> = {},
     repliedCommentIds: string[] = [],
+    postHistoryForPersistence: PostSummary[] = [],
   ): ActivitySummary {
     // Post type performance
     const typeMap = new Map<string, { count: number; totalUpvotes: number }>();
@@ -141,6 +142,7 @@ export class SummaryGenerator {
       lastCycleNumber: cycleNumber,
       repliedCommentIds,
       repliedThreadCounts,
+      postHistory: postHistoryForPersistence,
       stances,
       foreignStances,
     };

@@ -16,20 +16,8 @@
 
 import { create, type GemaiClient } from "nimji";
 import { http } from "./http.js";
-import {
-  loadCookies,
-  saveCookies,
-  loadConversation,
-  saveConversation,
-  type ConversationState,
-} from "./session-manager.js";
-import type {
-  GenerateRequest,
-  GenerateResponse,
-  Provider,
-  ProviderCapabilities,
-  ProviderConfig,
-} from "./provider.js";
+import { saveCookies, loadConversation, saveConversation } from "./session-manager.js";
+import type { GenerateRequest, GenerateResponse, Provider, ProviderCapabilities, ProviderConfig } from "./provider.js";
 
 export type GeminiProviderConfig = ProviderConfig & {
   /** Browser session cookies for Gemini web API */
@@ -50,10 +38,11 @@ async function refreshSession(opts: {
   const ua = "nimji/0.2.1 (github.com/Mra1k3r0/nimji)";
 
   try {
-    const { data: tokenData } = await http<{ ok: boolean; data?: { token: string } }>(
-      `${baseUrl}/api/auth/token`,
-      { method: "POST", headers: { "content-type": "application/json", "x-nimji-ua": ua }, body: {} },
-    );
+    const { data: tokenData } = await http<{ ok: boolean; data?: { token: string } }>(`${baseUrl}/api/auth/token`, {
+      method: "POST",
+      headers: { "content-type": "application/json", "x-nimji-ua": ua },
+      body: {},
+    });
     if (!tokenData.ok || !tokenData.data) return null;
 
     const { data: refreshData } = await http<{
@@ -85,7 +74,10 @@ async function refreshSession(opts: {
 
 // ─── Response quality classification (from nimji CLI) ───
 
-function classifyResponse(value: { text: string | null; meta: { statusCode: number; chunkCount: number; rawSize: number } }): string {
+function classifyResponse(value: {
+  text: string | null;
+  meta: { statusCode: number; chunkCount: number; rawSize: number };
+}): string {
   if (value.meta.statusCode !== 200) return "partial_stream";
   if (value.meta.chunkCount <= 1 || value.meta.rawSize < 220) return "partial_stream";
   if (!value.text || value.text.trim().length === 0) return "no_text";
@@ -120,7 +112,7 @@ export class GeminiProvider implements Provider {
     if (!cookies) {
       throw new Error(
         "Gemini provider requires COOKIES environment variable or config.cookies. " +
-          "Export your browser session cookie string from gemini.google.com DevTools."
+          "Export your browser session cookie string from gemini.google.com DevTools.",
       );
     }
 
@@ -221,6 +213,19 @@ export class GeminiProvider implements Provider {
       throw new Error("Gemini provider not initialized. Call initialize() first.");
     }
 
+    // If a different conversationKey is requested, temporarily switch conversations
+    const useSeparateConvo = request.conversationKey && request.conversationKey !== this.conversationKey;
+    let savedConvo = null;
+    if (useSeparateConvo) {
+      savedConvo = this.client.getConversation();
+      const altConvo = loadConversation(request.conversationKey);
+      this.client.setConversation(altConvo.conversationId ? {
+        conversationId: altConvo.conversationId,
+        responseId: altConvo.responseId,
+        choiceId: altConvo.choiceId,
+      } : {});
+    }
+
     const model = request.model ?? this.defaultModel;
     const generateOptions = {
       prompt: request.prompt,
@@ -286,10 +291,22 @@ export class GeminiProvider implements Provider {
 
     // Persist conversation state to per-key session store
     const conv = this.client.getConversation();
+
+    if (useSeparateConvo) {
+      // Save the alternate conversation's state
+      saveConversation(request.conversationKey!, {
+        conversationId: conv.conversationId,
+        responseId: conv.responseId,
+        choiceId: conv.choiceId,
+      });
+      // Restore the main conversation
+      if (savedConvo) this.client.setConversation(savedConvo);
+    }
+
     saveConversation(this.conversationKey, {
-      conversationId: conv.conversationId,
-      responseId: conv.responseId,
-      choiceId: conv.choiceId,
+      conversationId: useSeparateConvo && savedConvo ? (savedConvo as any).conversationId : conv.conversationId,
+      responseId: useSeparateConvo && savedConvo ? (savedConvo as any).responseId : conv.responseId,
+      choiceId: useSeparateConvo && savedConvo ? (savedConvo as any).choiceId : conv.choiceId,
     });
 
     const res = result.value;
