@@ -408,7 +408,7 @@ Output only the post content, no meta-commentary.`;
    */
   async comment(postId: string, content: string, parentId?: string): Promise<{ id: string; content: string }> {
     const body: Record<string, string> = { content };
-    if (parentId) body.parentId = parentId;
+    if (parentId) body.parent_id = parentId;
 
     const { status, data } = await http(`${this.baseUrl}/posts/${postId}/comments`, {
       method: "POST",
