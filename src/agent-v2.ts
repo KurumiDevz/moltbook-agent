@@ -888,6 +888,9 @@ export class AgentV2 {
       // Filter notifications: only keep those where we confirmed the author is NOT us
       const results: NotificationItem[] = [];
       for (const n of notifications) {
+        // Skip mention notifications — phantom/deleted comments we can't act on
+        if (n.type === "mention") continue;
+
         // For comment notifications, verify author via cross-reference
         if (n.type === "comment" || n.type === "comment_reply") {
           const commentId = n.relatedCommentId;
