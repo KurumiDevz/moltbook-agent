@@ -36,7 +36,9 @@ export function loadCookies(): CookieState {
     if (existsSync(COOKIE_FILE)) {
       return JSON.parse(readFileSync(COOKIE_FILE, "utf-8"));
     }
-  } catch { /* ignore */ }
+  } catch {
+    /* ignore */
+  }
   return {};
 }
 
@@ -44,7 +46,9 @@ export function saveCookies(state: CookieState): void {
   try {
     mkdirSync(DATA_DIR, { recursive: true });
     writeFileSync(COOKIE_FILE, JSON.stringify({ ...state, updatedAt: new Date().toISOString() }, null, 2));
-  } catch { /* ignore */ }
+  } catch {
+    /* ignore */
+  }
 }
 
 export function clearCookies(): void {
@@ -69,7 +73,9 @@ export function loadConversation(key: string): ConversationState {
     if (existsSync(filePath)) {
       return JSON.parse(readFileSync(filePath, "utf-8"));
     }
-  } catch { /* ignore */ }
+  } catch {
+    /* ignore */
+  }
   return {};
 }
 
@@ -78,7 +84,9 @@ export function saveConversation(key: string, state: ConversationState): void {
     ensureSessionsDir();
     const filePath = getConversationPath(key);
     writeFileSync(filePath, JSON.stringify({ ...state, updatedAt: new Date().toISOString() }, null, 2));
-  } catch { /* ignore */ }
+  } catch {
+    /* ignore */
+  }
 }
 
 export function deleteConversation(key: string): void {
@@ -87,14 +95,16 @@ export function deleteConversation(key: string): void {
     if (existsSync(filePath)) {
       unlinkSync(filePath);
     }
-  } catch { /* ignore */ }
+  } catch {
+    /* ignore */
+  }
 }
 
 export function listConversations(): Array<{ key: string; updatedAt?: string }> {
   try {
     ensureSessionsDir();
-    const files = readdirSync(SESSIONS_DIR).filter(f => f.endsWith(".json"));
-    return files.map(f => {
+    const files = readdirSync(SESSIONS_DIR).filter((f) => f.endsWith(".json"));
+    return files.map((f) => {
       const key = f.replace(/\.json$/, "");
       try {
         const state: ConversationState = JSON.parse(readFileSync(resolve(SESSIONS_DIR, f), "utf-8"));
@@ -109,6 +119,21 @@ export function listConversations(): Array<{ key: string; updatedAt?: string }> 
 }
 
 /**
+ * Check if a conversation should be rotated (too old or too many turns).
+ * Returns true if the conversation file is older than maxAgeMs.
+ */
+export function shouldRotateConversation(key: string, maxAgeMs: number = 12 * 60 * 60 * 1000): boolean {
+  try {
+    const filePath = getConversationPath(key);
+    if (!existsSync(filePath)) return false;
+    const stat = statSync(filePath);
+    return (Date.now() - stat.mtimeMs) > maxAgeMs;
+  } catch {
+    return false;
+  }
+}
+
+/**
  * Remove conversation files older than maxAgeMs.
  * Useful for cleaning up stale sub-agent sessions.
  */
@@ -116,7 +141,7 @@ export function cleanupOldSessions(maxAgeMs: number = 24 * 60 * 60 * 1000): numb
   try {
     ensureSessionsDir();
     const now = Date.now();
-    const files = readdirSync(SESSIONS_DIR).filter(f => f.endsWith(".json"));
+    const files = readdirSync(SESSIONS_DIR).filter((f) => f.endsWith(".json"));
     let removed = 0;
 
     for (const f of files) {
@@ -128,7 +153,9 @@ export function cleanupOldSessions(maxAgeMs: number = 24 * 60 * 60 * 1000): numb
           unlinkSync(filePath);
           removed++;
         }
-      } catch { /* skip */ }
+      } catch {
+        /* skip */
+      }
     }
 
     return removed;

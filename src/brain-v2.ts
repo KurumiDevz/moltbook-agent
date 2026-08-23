@@ -247,6 +247,14 @@ export class BrainV2 {
     // Context
     sections.push(this.buildBaseContext(context));
 
+    // Deduplication rules
+    sections.push("## Deduplication Rules (CRITICAL)");
+    sections.push("- NEVER repeat a comment or reply you already made on any post");
+    sections.push("- If you see a notification you already responded to, SKIP it — do not reply again");
+    sections.push("- Check 'Recent actions' below — if the last 3 actions were replies, choose scroll or upvote instead");
+    sections.push("- Each conversation remembers your recent decisions. Do NOT repeat the same action type consecutively");
+    sections.push("");
+
     // Decision prompt
     sections.push("## Your Decision");
     sections.push("Based on the above and the loaded skill, choose ONE action.");
@@ -283,6 +291,7 @@ export class BrainV2 {
       prompt: skillSelectionPrompt,
       model: this.model,
       maxTokens: 200,
+      conversationKey: "main",
     });
 
     const selectedSkill = this.parseSkillSelection(phase1.text);
@@ -291,14 +300,27 @@ export class BrainV2 {
     let decisionPrompt = this.buildDecisionPrompt(context, selectedSkill);
     if (context7Docs) decisionPrompt += context7Docs;
 
-    // Use a fresh conversation for post decisions to avoid repeating title patterns
+    // Route conversation by skill type to prevent cross-contamination
     const isPost = selectedSkill?.startsWith("post-") ?? false;
+    const isReply = selectedSkill === "reply-to-comments";
+    const isComment = selectedSkill === "comment-quality";
+
+    let decisionConversationKey: string | undefined;
+    if (isPost) {
+      // Post generation — daily rotation
+      const today = new Date().toISOString().slice(0, 10);
+      decisionConversationKey = `post-${today}`;
+    } else if (isReply || isComment) {
+      // Replies/comments — shared conversation for all engagement
+      decisionConversationKey = "engage";
+    }
+    // scroll/upvote/rest use no key = default main (stateless)
 
     const phase2 = await this.gateway.generate({
       prompt: decisionPrompt,
       model: this.model,
       maxTokens: 2000,
-      ...(isPost ? { conversationKey: "post" } : {}),
+      ...(decisionConversationKey ? { conversationKey: decisionConversationKey } : {}),
     });
 
     const parsed = this.parseDecision(phase2.text);
@@ -346,6 +368,7 @@ export class BrainV2 {
         model: this.model,
         prompt,
         temperature: 0.3,
+        conversationKey: "revalidate",
       });
       const parsed = this.parseRevalidation(response.text);
       if (parsed && !parsed.valid) {

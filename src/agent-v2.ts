@@ -14,6 +14,7 @@ import { BrainV2 } from "./brain-v2.js";
 import { runSubAgentTask } from "./sub-agent.js";
 import { SummaryGenerator } from "./summary.js";
 import { SkillValidator } from "./skill-validator.js";
+import { shouldRotateConversation, deleteConversation } from "./session-manager.js";
 import { resolve } from "node:path";
 import type {
   AgentDecision,
@@ -259,6 +260,19 @@ export class AgentV2 {
   async cycle(): Promise<ExecutionResult> {
     this.cycleCount++;
     console.log(`\n── Cycle ${this.cycleCount} ──`);
+
+    // Rotate stale conversations to prevent hallucination loops
+    const convoKeys = ["main", "engage", "revalidate"];
+    for (const key of convoKeys) {
+      if (shouldRotateConversation(key, 12 * 60 * 60 * 1000)) {
+        deleteConversation(key);
+        if (process.env.DEBUG) console.log(`[agent] Rotated stale conversation: ${key}`);
+      }
+    }
+    const today = new Date().toISOString().slice(0, 10);
+    if (shouldRotateConversation(`post-${today}`, 24 * 60 * 60 * 1000)) {
+      deleteConversation(`post-${today}`);
+    }
 
     // 1. Gather context
     console.log("👀 Gathering context...");
