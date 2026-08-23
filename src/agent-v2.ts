@@ -14,7 +14,7 @@ import { BrainV2 } from "./brain-v2.js";
 import { runSubAgentTask } from "./sub-agent.js";
 import { SummaryGenerator } from "./summary.js";
 import { SkillValidator } from "./skill-validator.js";
-import { shouldRotateConversation, deleteConversation, rotateOnDeploy } from "./session-manager.js";
+import { shouldRotateConversation, deleteConversation, rotateOnDeploy, cleanupOldPostConversations } from "./session-manager.js";
 import { resolve } from "node:path";
 import { readFileSync } from "node:fs";
 import type {
@@ -279,6 +279,12 @@ export class AgentV2 {
     const today = new Date().toISOString().slice(0, 10);
     if (shouldRotateConversation(`post-${today}`, 24 * 60 * 60 * 1000)) {
       deleteConversation(`post-${today}`);
+    }
+
+    // Clean up old per-post conversation files (prevent disk accumulation)
+    const cleaned = cleanupOldPostConversations(48 * 60 * 60 * 1000); // 48h threshold
+    if (cleaned > 0) {
+      console.log(`   Cleaned ${cleaned} stale post conversation(s)`);
     }
 
     // 1. Gather context

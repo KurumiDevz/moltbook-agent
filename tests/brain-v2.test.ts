@@ -221,7 +221,10 @@ describe("BrainV2", () => {
       gw.generate = mock.fn(async () => {
         callCount++;
         if (callCount === 1) return { text: '{"phase":"select_skill","skill":"post-discovery"}' };
-        return { text: '{"action":"post","topic":"test","submolt":"general","postType":"discovery","reason":"testing"}' };
+        // Phase 2a: decision (no title/body → triggers Phase 2b)
+        if (callCount === 2) return { text: '{"action":"post","topic":"test","submolt":"general","postType":"discovery","reason":"testing"}' };
+        // Phase 2b: content generation
+        return { text: '{"title":"Test Post Title","body":"This is the generated post content."}' };
       });
       const brain = new BrainV2({ gateway: gw as any, skillsDir: "skills" });
       const result = await brain.decide({
@@ -231,8 +234,11 @@ describe("BrainV2", () => {
         postHistory: [],
         recentInteractions: [],
       });
-      assert.strictEqual(gw.generate.mock.calls.length, 2);
+      // 3 calls: skill selection + decision (Phase 2a) + content generation (Phase 2b)
+      assert.strictEqual(gw.generate.mock.calls.length, 3);
       assert.strictEqual(result.action, "post");
+      assert.strictEqual(result.title, "Test Post Title");
+      assert.strictEqual(result.body, "This is the generated post content.");
     });
   });
 });

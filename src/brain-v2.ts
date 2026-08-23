@@ -217,7 +217,7 @@ export class BrainV2 {
     return sections.join("\n");
   }
 
-  /** Phase 2: Build prompt for decision with selected skill. */
+  /** Phase 2a: Build prompt for deciding action + target (stateless — no content generation). */
   buildDecisionPrompt(
     context: {
       feed: FeedPost[];
@@ -255,11 +255,111 @@ export class BrainV2 {
     sections.push("- Each conversation remembers your recent decisions. Do NOT repeat the same action type consecutively");
     sections.push("");
 
-    // Decision prompt
+    // Decision prompt — action + target ONLY, no content
     sections.push("## Your Decision");
     sections.push("Based on the above and the loaded skill, choose ONE action.");
+    sections.push("Do NOT write content yet — just decide WHAT to do and WHERE.");
+    sections.push("");
     sections.push("Respond with ONLY a JSON object. No markdown, no explanation.");
     sections.push("");
+    sections.push("For comment/reply actions, include the target postId.");
+    sections.push("For reply_to_comment, also include the commentId you're replying to.");
+
+    return sections.join("\n");
+  }
+
+  /** Phase 2b: Build prompt for generating content (routed to per-post conversation). */
+  buildContentPrompt(
+    decision: { action: string; postId?: string; commentId?: string; reason?: string; topic?: string; submolt?: string; postType?: string },
+    context: {
+      feed: FeedPost[];
+      notifications: NotificationItem[];
+      rateLimits: RateLimitState;
+    postHistory: Array<{ type: string; submolt: string; upvotes: number; timestamp: number; title?: string }>;
+      recentInteractions: string[];
+      summary?: string;
+      stances?: Array<{ topic: string; position: string; context: string; source: string; timestamp: number }>;
+      foreignStances?: Array<{ agentName: string; topic: string; position: string; context: string; source: string; timestamp: number }>;
+    },
+    skillName: string,
+  ): string {
+    const sections: string[] = [];
+
+    // Core identity
+    sections.push(this.coreSkill.content);
+    sections.push("");
+
+    // Selected skill content
+    const skill = this.allSkills.get(skillName);
+    if (skill) {
+      sections.push(skill.content);
+      sections.push("");
+    }
+
+    // Context (lighter — just feed/notifications for this post)
+    sections.push("## Context");
+    if (decision.postId) {
+      const targetPost = context.feed.find((p) => p.id === decision.postId);
+      if (targetPost) {
+        sections.push(`### Target Post`);
+        sections.push(`- ID: ${targetPost.id}`);
+        sections.push(`- Title: "${targetPost.title}"`);
+        sections.push(`- Author: ${targetPost.author}`);
+        sections.push(`- Submolt: /m/${targetPost.submolt}`);
+        sections.push(`- Content: ${(targetPost.content ?? "").slice(0, 500)}`);
+        sections.push("");
+      }
+      // Show recent stances as dedup reference
+      sections.push(`### Your recent stances`);
+      if ((context.stances ?? []).length > 0) {
+        for (const s of (context.stances ?? []).slice(-5)) {
+          sections.push(`- [${s.source}] "${s.position}" — ${s.context.slice(0, 100)}`);
+        }
+      } else {
+        sections.push("- (no previous stances recorded)");
+      }
+      sections.push("");
+    }
+
+    // Preliminary decision to execute
+    sections.push("## Decision to Execute");
+    sections.push(`- Action: ${decision.action}`);
+    if (decision.topic) sections.push(`- Topic: ${decision.topic}`);
+    if (decision.submolt) sections.push(`- Submolt: ${decision.submolt}`);
+    if (decision.postType) sections.push(`- Post type: ${decision.postType}`);
+    if (decision.commentId) sections.push(`- Replying to comment: ${decision.commentId}`);
+    sections.push(`- Reason: ${decision.reason ?? "ai_decided"}`);
+    sections.push("");
+
+    // Content generation instructions
+    sections.push("## Generate Content");
+    if (decision.action === "comment") {
+      sections.push("Write a thoughtful comment on the target post above.");
+      sections.push("Rules:");
+      sections.push("- Do NOT repeat anything you already said on this post (see previous actions above)");
+      sections.push("- Add new value — a different angle, data, or experience");
+      sections.push("- 2-4 sentences, specific and concrete");
+      sections.push("- No generic praise, no \"great post!\" — be substantive");
+    } else if (decision.action === "reply_to_comment") {
+      sections.push("Write a reply to the specific comment being addressed.");
+      sections.push("Rules:");
+      sections.push("- Address the point directly, don't rehash what you already said");
+      sections.push("- Add new information or perspective");
+      sections.push("- 1-3 sentences, focused");
+    } else if (decision.action === "post") {
+      sections.push(`Write a Moltbook post about "${decision.topic}" for /m/${decision.submolt}.`);
+      sections.push(`Type: ${decision.postType ?? "discovery"}. 150-300 words. Be specific and unique.`);
+      sections.push("Output format:");
+      sections.push("TITLE: short title");
+      sections.push("BODY: post content");
+    }
+    sections.push("");
+    sections.push("Respond with ONLY a JSON object:");
+    if (decision.action === "post") {
+      sections.push('{ "title": "post title", "body": "post content" }');
+    } else {
+      sections.push('{ "content": "your comment or reply text" }');
+    }
 
     return sections.join("\n");
   }
@@ -267,7 +367,8 @@ export class BrainV2 {
   /**
    * Three-phase decide:
    *   Phase 1: AI selects skill (sees context + skill list)
-   *   Phase 2: AI makes decision (sees context + skill content)
+   *   Phase 2a: AI decides action + target (stateless, no content)
+   *   Phase 2b: AI generates content (routed to per-post conversation)
    *   Phase 3: AI revalidates decision (see revalidateDecision())
    */
   async decide(context: {
@@ -295,50 +396,158 @@ export class BrainV2 {
 
     const selectedSkill = this.parseSkillSelection(phase1.text);
 
-    // ── Phase 2: Decision with selected skill ──
+    // ── Phase 2a: Decide action + target (stateless) ──
     let decisionPrompt = this.buildDecisionPrompt(context, selectedSkill);
     if (context7Docs) decisionPrompt += context7Docs;
 
-    // Route conversation by skill type to prevent cross-contamination
-    const isPost = selectedSkill?.startsWith("post-") ?? false;
-
-    let decisionConversationKey: string | undefined;
-    if (isPost) {
-      // Post generation — daily rotation
-      const today = new Date().toISOString().slice(0, 10);
-      decisionConversationKey = `post-${today}`;
-    }
-    // All other decisions (reply, comment, scroll, upvote) are stateless —
-    // no conversation key means fresh context each time. The prompt already
-    // contains all feed/notifications/rate-limit context needed.
-
-    const phase2 = await this.gateway.generate({
+    const phase2a = await this.gateway.generate({
       prompt: decisionPrompt,
       model: this.model,
-      maxTokens: 2000,
-      ...(decisionConversationKey ? { conversationKey: decisionConversationKey } : {}),
+      maxTokens: 500,
     });
 
-    const parsed = this.parseDecision(phase2.text);
-    if (parsed) return parsed;
+    const preliminary = this.parseDecision(phase2a.text);
 
-    // Retry with explicit instruction
+    if (!preliminary) {
+      // Retry once with explicit instruction
+      const retryPrompt =
+        decisionPrompt +
+        "\n\n**IMPORTANT**: Your previous response was not valid JSON. " +
+        'You MUST respond with ONLY a JSON object like {"action": "scroll", "reason": "..."}. ' +
+        "No markdown, no explanation, no other text.";
+
+      const retry = await this.gateway.generate({
+        prompt: retryPrompt,
+        model: this.model,
+        maxTokens: 500,
+      });
+
+      const retryParsed = this.parseDecision(retry.text);
+      if (retryParsed) {
+        // If retry needs content, continue to Phase 2b
+        if (this.needsContentGeneration(retryParsed)) {
+          return this.generateContent(retryParsed, context, selectedSkill, context7Docs);
+        }
+        return retryParsed;
+      }
+
+      return { action: "scroll", reason: "failed_to_parse_ai_output" };
+    }
+
+    // ── Phase 2b: Generate content for actions that need it ──
+    if (this.needsContentGeneration(preliminary)) {
+      return this.generateContent(preliminary, context, selectedSkill, context7Docs);
+    }
+
+    return preliminary;
+  }
+
+  /** Check if a decision needs Phase 2b content generation. */
+  private needsContentGeneration(decision: AgentDecision): boolean {
+    if (decision.action === "comment" || decision.action === "reply_to_comment") {
+      // Content is empty or missing — needs generation
+      return !decision.content || decision.content.trim().length === 0;
+    }
+    if (decision.action === "post") {
+      // Title/body missing or placeholder — needs generation
+      return !decision.title || decision.title.trim().length === 0;
+    }
+    return false;
+  }
+
+  /** Phase 2b: Generate content in a per-post conversation. */
+  private async generateContent(
+    preliminary: AgentDecision,
+    context: {
+      feed: FeedPost[];
+      notifications: NotificationItem[];
+      rateLimits: RateLimitState;
+      postHistory: Array<{ type: string; submolt: string; upvotes: number; timestamp: number; title?: string }>;
+      recentInteractions: string[];
+      summary?: string;
+      stances?: Array<{ topic: string; position: string; context: string; source: string; timestamp: number }>;
+      foreignStances?: Array<{ agentName: string; topic: string; position: string; context: string; source: string; timestamp: number }>;
+    },
+    skillName: string,
+    context7Docs: string | null,
+  ): Promise<AgentDecision> {
+    // Route to per-post conversation
+    let targetId: string | undefined;
+    if (preliminary.action === "post") {
+      targetId = `post-${new Date().toISOString().slice(0, 10)}`;
+    } else if ("postId" in preliminary) {
+      targetId = preliminary.postId;
+    }
+
+    const contentPrompt = this.buildContentPrompt(preliminary, context, skillName);
+    let fullPrompt = contentPrompt;
+    if (context7Docs) fullPrompt += context7Docs;
+
+    const phase2b = await this.gateway.generate({
+      prompt: fullPrompt,
+      model: this.model,
+      maxTokens: 2000,
+      ...(targetId ? { conversationKey: targetId } : {}),
+    });
+
+    const contentParsed = this.parseContentResponse(phase2b.text, preliminary);
+    if (contentParsed) return contentParsed;
+
+    // Retry content generation once
     const retryPrompt =
-      decisionPrompt +
+      fullPrompt +
       "\n\n**IMPORTANT**: Your previous response was not valid JSON. " +
-      'You MUST respond with ONLY a JSON object like {"action": "scroll", "reason": "..."}. ' +
-      "No markdown, no explanation, no other text.";
+      "Respond with ONLY a JSON object containing the content field.";
 
     const retry = await this.gateway.generate({
       prompt: retryPrompt,
       model: this.model,
       maxTokens: 2000,
+      ...(targetId ? { conversationKey: targetId } : {}),
     });
 
-    const retryParsed = this.parseDecision(retry.text);
+    const retryParsed = this.parseContentResponse(retry.text, preliminary);
     if (retryParsed) return retryParsed;
 
-    return { action: "scroll", reason: "failed_to_parse_ai_output" };
+    // Fallback: return preliminary with empty content
+    return preliminary;
+  }
+
+  /** Parse Phase 2b content response and merge with preliminary decision. */
+  private parseContentResponse(text: string, preliminary: AgentDecision): AgentDecision | null {
+    if (!text) return null;
+
+    let cleaned = text.trim();
+    cleaned = cleaned.replace(/^```(?:json)?\s*/i, "").replace(/\s*```$/i, "");
+    cleaned = cleaned.trim();
+
+    const jsonMatch = cleaned.match(/\{[\s\S]*\}/);
+    if (!jsonMatch) return null;
+
+    try {
+      const obj = JSON.parse(jsonMatch[0]);
+
+      if (preliminary.action === "post") {
+        if (typeof obj.title !== "string" || typeof obj.body !== "string") return null;
+        return {
+          ...preliminary,
+          title: obj.title,
+          body: obj.body,
+        };
+      }
+
+      if (preliminary.action === "comment" || preliminary.action === "reply_to_comment") {
+        if (typeof obj.content !== "string") return null;
+        return {
+          ...preliminary,
+          content: obj.content,
+        };
+      }
+
+      return null;
+    } catch {
+      return null;
+    }
   }
 
   /** Phase 3: Revalidate a decision before execution. AI checks itself. */

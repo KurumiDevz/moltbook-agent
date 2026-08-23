@@ -171,6 +171,37 @@ export function rotateOnDeploy(currentVersion: string): boolean {
 }
 
 /**
+ * Remove post-* conversation files older than maxAgeMs.
+ * Keeps per-post conversations from accumulating indefinitely.
+ */
+export function cleanupOldPostConversations(maxAgeMs: number = 24 * 60 * 60 * 1000): number {
+  try {
+    ensureSessionsDir();
+    const now = Date.now();
+    const files = readdirSync(SESSIONS_DIR).filter((f) => f.startsWith("post-") && f.endsWith(".json"));
+    let removed = 0;
+
+    for (const f of files) {
+      try {
+        const filePath = resolve(SESSIONS_DIR, f);
+        const stat = statSync(filePath);
+        const age = now - stat.mtimeMs;
+        if (age > maxAgeMs) {
+          unlinkSync(filePath);
+          removed++;
+        }
+      } catch {
+        /* skip */
+      }
+    }
+
+    return removed;
+  } catch {
+    return 0;
+  }
+}
+
+/**
  * Remove conversation files older than maxAgeMs.
  * Useful for cleaning up stale sub-agent sessions.
  */
