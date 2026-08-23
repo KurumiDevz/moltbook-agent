@@ -323,6 +323,8 @@ export class AgentV2 {
         return this.executePost(decision);
       case "comment":
         return this.executeComment(decision);
+      case "reply_to_comment":
+        return this.executeReplyToComment(decision);
       case "upvote":
         return this.executeUpvote(decision);
       case "downvote":
@@ -407,6 +409,24 @@ export class AgentV2 {
     return { success: true, action: "comment", message: `Commented on ${decision.postId}`, karmaDelta: 1 };
   }
 
+  private async executeReplyToComment(decision: Extract<AgentDecision, { action: "reply_to_comment" }>): Promise<ExecutionResult> {
+    if (!this.getRateLimits().canComment) {
+      return { success: false, action: "reply_to_comment", message: "Rate limited — cannot comment yet" };
+    }
+
+    if (!decision.content) {
+      return { success: false, action: "reply_to_comment", message: "No reply content provided" };
+    }
+
+    await this.moltbookAgent.comment(decision.postId, decision.content);
+
+    this.memory.totalComments++;
+    this.memory.commentsToday++;
+    this.memory.lastCommentAt = Date.now();
+
+    return { success: true, action: "reply_to_comment", message: `Replied to comment ${decision.commentId} on post ${decision.postId}`, karmaDelta: 1 };
+  }
+
   private async executeUpvote(decision: Extract<AgentDecision, { action: "upvote" }>): Promise<ExecutionResult> {
     await this.moltbookAgent.vote(decision.postId, "up");
     this.memory.totalUpvotes++;
@@ -448,10 +468,12 @@ export class AgentV2 {
       const { notifications } = await this.moltbookAgent.getNotifications({ limit: 15 });
       return notifications.map((n: any) => ({
         type: n.type,
-        message: n.message,
+        message: n.content ?? n.message,
         agentName: n.agent_name,
-        postId: n.post_id,
-        createdAt: n.created_at,
+        postId: n.relatedPostId ?? n.post_id,
+        commentId: n.relatedCommentId ?? n.comment_id,
+        commentContent: n.comment?.content,
+        createdAt: n.createdAt ?? n.created_at,
       }));
     } catch {
       return [];

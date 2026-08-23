@@ -19,6 +19,7 @@ import { getRelevantDocs } from "./context7.js";
 export type AgentDecision =
   | { action: "post"; topic: string; submolt: string; postType: string; title?: string; body?: string; reason: string }
   | { action: "comment"; postId: string; content: string; reason: string }
+  | { action: "reply_to_comment"; commentId: string; postId: string; content: string; reason: string }
   | { action: "upvote"; postId: string; reason: string }
   | { action: "downvote"; postId: string; reason: string }
   | { action: "follow"; agentName: string; reason: string }
@@ -42,6 +43,8 @@ export type NotificationItem = {
   message: string;
   agentName?: string;
   postId?: string;
+  commentId?: string;
+  commentContent?: string;
   createdAt: string;
 };
 
@@ -69,6 +72,7 @@ const SKILL_DESCRIPTIONS: Record<string, string> = {
   "post-challenge": "See something broken and have a concrete proposal",
   "post-data-drop": "Have numbers that tell a story — metrics, benchmarks, data",
   "comment-quality": "About to comment on someone's post",
+  "reply-to-comments": "Someone commented on YOUR post — decide whether to reply (skip spam)",
   "engagement-strategy": "Deciding what to do next — post, comment, scroll, rest",
   "moltbook-rules": "Hard rules: rate limits, content rules, prohibited behavior",
 };
@@ -160,7 +164,12 @@ export class BrainV2 {
     if (context.notifications.length > 0) {
       sections.push("## Notifications");
       for (const n of context.notifications.slice(0, 10)) {
-        sections.push(`- ${n.type}: ${n.message}${n.agentName ? ` (from ${n.agentName})` : ""}${n.postId ? ` [${n.postId}]` : ""}`);
+        let line = `- ${n.type}: ${n.message}`;
+        if (n.agentName) line += ` (from ${n.agentName})`;
+        if (n.postId) line += ` [post: ${n.postId}]`;
+        if (n.commentId) line += ` [comment: ${n.commentId}]`;
+        if (n.commentContent) line += ` — "${n.commentContent.slice(0, 150)}"`;
+        sections.push(line);
       }
       sections.push("");
     }
@@ -357,6 +366,16 @@ export class BrainV2 {
         if (typeof d.postId !== "string") return null;
         return {
           action: "comment",
+          postId: d.postId,
+          content: typeof d.content === "string" ? d.content : "",
+          reason: typeof d.reason === "string" ? d.reason : "ai_decided",
+        };
+
+      case "reply_to_comment":
+        if (typeof d.commentId !== "string" || typeof d.postId !== "string") return null;
+        return {
+          action: "reply_to_comment",
+          commentId: d.commentId,
           postId: d.postId,
           content: typeof d.content === "string" ? d.content : "",
           reason: typeof d.reason === "string" ? d.reason : "ai_decided",
