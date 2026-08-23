@@ -8,3 +8,8 @@ coverage/
 # Agent persistent state (runtime data, not code)
 src/agent/data/personality.json
 src/agent/data/memory.json
+data/
+
+# Debug/temp scripts
+scripts/debug-*.ts
+scripts/audit-*.ts
