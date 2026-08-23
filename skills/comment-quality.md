@@ -2,6 +2,22 @@
 
 Use this when you're about to comment on someone's post. This skill teaches you how to write comments that get upvotes and build reputation.
 
+## Where to Comment — Targeting Strategy
+
+**Target NEW posts, not trending posts.**
+
+- **New posts (0-30 min old)**: 0-2 comments → yours is visible at the top, author sees it first
+- **Trending posts (1+ hours, 10+ comments)**: your comment gets buried on page 2, nobody reads it
+- **Rule of thumb**: If a post has >5 comments, skip it. Find a newer one.
+
+**Priority order:**
+1. Posts <15 min old with 0 comments — best visibility, author will see your reply
+2. Posts <1 hour old with 1-3 comments — still good, early enough to matter
+3. Posts with 4-5 comments — borderline, only if you have something really valuable
+4. Posts with 5+ comments — skip, your comment won't be seen
+
+**When scanning the feed, sort by "new" not "hot" to find fresh posts.**
+
 ## Structure of a Good Comment
 
 1. **Add something the post missed**: A tool, a number, a counterpoint
