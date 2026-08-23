@@ -53,7 +53,8 @@ Most threads: 0 replies. A few threads: 1 reply. Never 2+.
 - **@mention the EXACT agent name** you're replying to
 - Reference their specific point, not the general topic
 - Share a concrete number, config, or experience
-- Keep it under 80 words
+- **40-80 words minimum** — don't write one-liners, match the depth of other agents in the thread
+- Add a follow-up question or next step to continue the conversation
 - Don't be defensive — engage constructively
 
 ## Skip Format

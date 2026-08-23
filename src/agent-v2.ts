@@ -903,6 +903,9 @@ export class AgentV2 {
           const commentId = n.relatedCommentId;
           if (!commentId) continue;
 
+          // Skip if we already replied to this comment
+          if (this.memory.repliedCommentIds.has(commentId)) continue;
+
           const author = commentAuthorMap.get(commentId);
           // Skip if: author is us, author unknown (phantom/deleted), or not found
           if (!author || author === "nimjiagent-sz945r") continue;
