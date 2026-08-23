@@ -158,43 +158,83 @@ export class AgentV2 {
     }
   }
 
-  /** Hydrate repliedThreadCounts from API on startup so revalidation has accurate data. */
+  /** Hydrate repliedThreadCounts from API on startup — scans feed + notifications for our posts and comments. */
   private async hydrateReplyCounts(): Promise<void> {
     console.log("🔄 Hydrating reply counts from API...");
-    try {
-      const home = await this.moltbookAgent.getHome();
-      if (!home.ok) {
-        console.log("   ⚠ Could not fetch home for hydration");
-        return;
-      }
-      const homeData = home.value as any;
-      const activityPosts = homeData.activity_on_your_posts ?? [];
+    const postIdsToScan = new Set<string>();
 
-      for (const a of activityPosts) {
-        const postId = a.post_id;
-        if (!postId) continue;
-        const commentsResult = await this.moltbookAgent.listComments(postId, { sort: "old", limit: 100 });
-        if (commentsResult.ok) {
-          const comments = (commentsResult.value as any).comments ?? [];
-          // Count our comments per parent comment (thread)
-          for (const c of comments) {
-            if (c.author?.name === "nimjiagent-sz945r") {
-              // Thread key = parentId (reply thread) or comment's own ID (top-level)
-              const threadKey = c.parentId ?? c.id;
-              const current = this.memory.repliedThreadCounts.get(threadKey) ?? 0;
-              this.memory.repliedThreadCounts.set(threadKey, current + 1);
+    try {
+      // 1. Find our posts by scanning the feed (same approach as my-posts.ts)
+      for (const sort of ["new", "hot", "top"] as const) {
+        let offset = 0;
+        for (let page = 0; page < 5; page++) {
+          try {
+            const result = await this.moltbookAgent.listPosts({ sort, limit: 50, offset });
+            if (!result.ok) break;
+            const data = result.value as any;
+            const posts = data.posts ?? [];
+            for (const p of posts) {
+              if (p.author?.name === "nimjiagent-sz945r" || p.author === "nimjiagent-sz945r") {
+                postIdsToScan.add(p.id);
+              }
             }
+            if (!data.has_more || posts.length === 0) break;
+            offset = data.next_offset ?? offset + 50;
+          } catch {
+            break;
           }
         }
       }
-      const hydrated = [...this.memory.repliedThreadCounts.entries()].filter(([, c]) => c > 0);
-      if (hydrated.length > 0) {
-        console.log(`   Hydrated ${hydrated.length} threads: ${hydrated.map(([id, c]) => `${id.slice(0, 8)}...(${c})`).join(", ")}`);
-      } else {
-        console.log("   No existing replies found");
+    } catch {
+      /* feed scan failed */
+    }
+
+    try {
+      // 2. Find other posts we commented on via notifications (replies to our comments)
+      const notifs = await this.moltbookAgent.getNotifications({ limit: 100 });
+      if (notifs.ok) {
+        const data = notifs.value as any;
+        for (const n of data.notifications ?? []) {
+          if (n.post_id) postIdsToScan.add(n.post_id);
+        }
       }
-    } catch (err) {
-      console.log(`   ⚠ Hydration failed: ${err instanceof Error ? err.message : err}`);
+    } catch {
+      /* notification scan failed */
+    }
+
+    if (postIdsToScan.size === 0) {
+      console.log("   No posts found — starting fresh");
+      return;
+    }
+
+    console.log(`   Found ${postIdsToScan.size} posts to scan — counting replies...`);
+
+    // 3. For each post, list comments and count our replies per thread
+    let threadCount = 0;
+    for (const postId of postIdsToScan) {
+      try {
+        const commentsResult = await this.moltbookAgent.listComments(postId, { sort: "old", limit: 100 });
+        if (!commentsResult.ok) continue;
+        const comments = (commentsResult.value as any).comments ?? [];
+        for (const c of comments) {
+          if (c.author?.name === "nimjiagent-sz945r") {
+            const threadKey = c.parentId ?? c.id;
+            const current = this.memory.repliedThreadCounts.get(threadKey) ?? 0;
+            this.memory.repliedThreadCounts.set(threadKey, current + 1);
+            this.memory.repliedCommentIds.add(c.id);
+          }
+        }
+      } catch {
+        /* skip failed posts */
+      }
+    }
+
+    const hydrated = [...this.memory.repliedThreadCounts.entries()].filter(([, c]) => c > 0);
+    threadCount = hydrated.length;
+    if (hydrated.length > 0) {
+      console.log(`   Hydrated ${hydrated.length} threads: ${hydrated.map(([id, c]) => `${id.slice(0, 8)}...(${c})`).join(", ")}`);
+    } else {
+      console.log("   No existing replies found (comments may be deleted)");
     }
   }
 
@@ -446,7 +486,7 @@ export class AgentV2 {
       this.summaryGen.failTask(this.memory.taskQueue, task.id, result.message);
     }
 
-    // 8. Save summary after each cycle (persist task state)
+    // 8. Save summary after each cycle (persist task state + reply counts)
     try {
       const cycleSummary = this.summaryGen.generate(
         this.memory.postHistory,
@@ -456,6 +496,8 @@ export class AgentV2 {
         this.cycleCount,
         this.memory.stances,
         this.memory.foreignStances,
+        Object.fromEntries(this.memory.repliedThreadCounts),
+        [...this.memory.repliedCommentIds],
       );
       this.summaryGen.save(cycleSummary);
       this.lastSummary = cycleSummary;

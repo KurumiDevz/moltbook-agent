@@ -42,6 +42,7 @@ export class SummaryGenerator {
     stances: Stance[] = [],
     foreignStances: ForeignStance[] = [],
     repliedThreadCounts: Record<string, number> = {},
+    repliedCommentIds: string[] = [],
   ): ActivitySummary {
     // Post type performance
     const typeMap = new Map<string, { count: number; totalUpvotes: number }>();
@@ -138,7 +139,7 @@ export class SummaryGenerator {
       pendingTasks,
       nextAction,
       lastCycleNumber: cycleNumber,
-      repliedCommentIds: this.getRepliedCommentIds(),
+      repliedCommentIds,
       repliedThreadCounts,
       stances,
       foreignStances,
