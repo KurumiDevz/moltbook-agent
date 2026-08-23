@@ -14,6 +14,7 @@ import { BrainV2, type AgentDecision, type FeedPost, type NotificationItem, type
 import { runSubAgentTask, type ScoredPost } from "./sub-agent.js";
 import { SummaryGenerator, type ActivitySummary, type TaskQueueItem } from "./summary.js";
 import { SkillValidator } from "./skill-validator.js";
+import { resolve } from "node:path";
 
 // ── Types ────────────────────────────────────────────────────────────
 
@@ -48,6 +49,7 @@ type PostRecord = {
   submolt: string;
   type: string;
   upvotes: number;
+  comments: number;
   timestamp: number;
 };
 
@@ -154,26 +156,29 @@ export class AgentV2 {
     const rawFeed = await this.fetchFeed();
     const notifications = await this.fetchNotifications();
     const rateLimits = this.getRateLimits();
+    const home = await this.fetchHome();
+    console.log(`   Home: ${home.activity.length} posts with activity | ${home.unreadCount} unread`);
 
     // 2. Sub-agent scores feed (lightweight, fire-and-forget)
     console.log("🔍 Sub-agent scoring feed...");
     let feed: FeedPost[];
     try {
+      const task = {
+        type: "score_feed" as const,
+        posts: rawFeed.map((p) => ({
+          id: p.id,
+          title: p.title,
+          content: p.content,
+          submolt: p.submolt,
+          author: p.author,
+          upvotes: p.upvotes,
+          comment_count: p.comment_count,
+        })),
+        agentValues: ["security", "craft", "honesty", "autonomy"],
+        prompt: "",
+      };
       const scored = await runSubAgentTask(
-        {
-          type: "score_feed",
-          posts: rawFeed.map((p) => ({
-            id: p.id,
-            title: p.title,
-            content: p.content,
-            submolt: p.submolt,
-            author: p.author,
-            upvotes: p.upvotes,
-            comment_count: p.comment_count,
-          })),
-          agentValues: ["security", "craft", "honesty", "autonomy"],
-          prompt: "", // not used for heuristic scoring
-        },
+        task,
         (opts) => this.gateway.generate(opts),
         this.subAgentModel,
       );
@@ -295,6 +300,8 @@ export class AgentV2 {
     const feed = await this.fetchFeed();
     const notifications = await this.fetchNotifications();
     const rateLimits = this.getRateLimits();
+    const home = await this.fetchHome();
+    console.log(`   Home: ${home.activity.length} posts with activity | ${home.unreadCount} unread`);
 
     // Try to load existing summary
     const summaryText = this.summaryGen.formatForPrompt(
@@ -382,6 +389,7 @@ export class AgentV2 {
       submolt: decision.submolt,
       type: decision.postType,
       upvotes: 0,
+      comments: 0,
       timestamp: Date.now(),
     });
     this.memory.topicsSeen.push({ topic: decision.topic, timestamp: Date.now() });
@@ -406,6 +414,11 @@ export class AgentV2 {
     this.memory.commentsToday++;
     this.memory.lastCommentAt = Date.now();
 
+    // Mark notifications as read for the post we commented on (best effort)
+    try {
+      await this.moltbookAgent.markNotificationsRead(decision.postId);
+    } catch { /* best effort */ }
+
     return { success: true, action: "comment", message: `Commented on ${decision.postId}`, karmaDelta: 1 };
   }
 
@@ -424,6 +437,11 @@ export class AgentV2 {
     this.memory.totalComments++;
     this.memory.commentsToday++;
     this.memory.lastCommentAt = Date.now();
+
+    // Mark notifications as read for the post we replied on (best effort)
+    try {
+      await this.moltbookAgent.markNotificationsRead(decision.postId);
+    } catch { /* best effort */ }
 
     return { success: true, action: "reply_to_comment", message: `Replied to comment ${decision.commentId} on post ${decision.postId}`, karmaDelta: 1 };
   }
@@ -461,6 +479,35 @@ export class AgentV2 {
       }));
     } catch {
       return [];
+    }
+  }
+
+  /** Fetch home dashboard — single API call for all context */
+  private async fetchHome(): Promise<{
+    activity: Array<{ post_id: string; post_title: string; new_notification_count: number; latest_commenters: string[] }>;
+    followingFeed: FeedPost[];
+    unreadCount: number;
+    whatToDo: string[];
+  }> {
+    try {
+      const home = await this.moltbookAgent.getHome();
+      return {
+        activity: home.activity_on_your_posts ?? [],
+        followingFeed: (home.posts_from_accounts_you_follow?.posts ?? []).map((p) => ({
+          id: p.id,
+          title: p.title,
+          content: p.content ?? "",
+          submolt: p.submolt?.name ?? "",
+          author: p.author?.name ?? "",
+          upvotes: p.upvotes ?? 0,
+          comment_count: p.comment_count ?? 0,
+          createdAt: p.created_at ?? "",
+        })),
+        unreadCount: home.your_account?.unread_notification_count ?? 0,
+        whatToDo: home.what_to_do_next ?? [],
+      };
+    } catch {
+      return { activity: [], followingFeed: [], unreadCount: 0, whatToDo: [] };
     }
   }
 

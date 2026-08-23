@@ -115,13 +115,30 @@ export type Submolt = {
 
 /** Home dashboard data */
 export type HomeData = {
-  stats: { agents: number; submolts: number; posts: number; comments: number };
-  karma: number;
-  unread_count: number;
-  dms_waiting: number;
-  activity: Array<{ type: string; post_id?: string; agent_name?: string }>;
-  suggested_actions: string[];
-  following_feed: Post[];
+  your_account: {
+    name: string;
+    karma: number;
+    unread_notification_count: number;
+  };
+  activity_on_your_posts: Array<{
+    post_id: string;
+    post_title: string;
+    submolt_name: string;
+    new_notification_count: number;
+    latest_at: string;
+    latest_commenters: string[];
+    preview: string;
+  }>;
+  latest_moltbook_announcement?: {
+    post_id: string;
+    title: string;
+    preview: string;
+  };
+  posts_from_accounts_you_follow: {
+    posts: Post[];
+    total_following: number;
+  };
+  what_to_do_next: string[];
 };
 
 /**
@@ -368,6 +385,25 @@ Output only the post content, no meta-commentary.`;
   }
 
   /**
+   * Get personalized feed (subscriptions + follows).
+   */
+  async getPersonalizedFeed(options?: {
+    sort?: "hot" | "new" | "top";
+    filter?: "all" | "following";
+    limit?: number;
+  }): Promise<{
+    posts: Post[];
+    has_more: boolean;
+    next_cursor?: string;
+  }> {
+    const params = new URLSearchParams();
+    if (options?.sort) params.set("sort", options.sort);
+    if (options?.filter) params.set("filter", options.filter);
+    if (options?.limit) params.set("limit", String(options.limit));
+    return this.request("GET", `/feed?${params}`);
+  }
+
+  /**
    * Comment on a post. Pass parentId for threaded replies.
    */
   async comment(postId: string, content: string, parentId?: string): Promise<{ id: string; content: string }> {
@@ -588,14 +624,40 @@ Output only the post content, no meta-commentary.`;
       };
     });
 
+    const rawActivity = (resp.activity_on_your_posts ?? []) as Array<Record<string, unknown>>;
+    const activityOnYourPosts = rawActivity.map((a) => ({
+      post_id: (a.post_id ?? "") as string,
+      post_title: (a.post_title ?? "") as string,
+      submolt_name: (a.submolt_name ?? "") as string,
+      new_notification_count: (a.new_notification_count as number) ?? 0,
+      latest_at: (a.latest_at ?? "") as string,
+      latest_commenters: (a.latest_commenters as string[]) ?? [],
+      preview: (a.preview ?? "") as string,
+    }));
+
+    const announcement = resp.latest_moltbook_announcement as Record<string, unknown> | undefined;
+
+    const whatToDoNext = (resp.what_to_do_next ?? []) as string[];
+
     return {
-      stats: { agents: 0, submolts: 0, posts: 0, comments: 0 },
-      karma: (account.karma as number) ?? 0,
-      unread_count: (account.unread_notification_count as number) ?? 0,
-      dms_waiting: 0,
-      activity: [],
-      suggested_actions: [],
-      following_feed: followingFeed,
+      your_account: {
+        name: (account.name ?? "") as string,
+        karma: (account.karma as number) ?? 0,
+        unread_notification_count: (account.unread_notification_count as number) ?? 0,
+      },
+      activity_on_your_posts: activityOnYourPosts,
+      latest_moltbook_announcement: announcement
+        ? {
+            post_id: (announcement.post_id ?? "") as string,
+            title: (announcement.title ?? "") as string,
+            preview: (announcement.preview ?? "") as string,
+          }
+        : undefined,
+      posts_from_accounts_you_follow: {
+        posts: followingFeed,
+        total_following: (followFeed.total_following as number) ?? 0,
+      },
+      what_to_do_next: whatToDoNext,
     };
   }
 
@@ -691,14 +753,28 @@ Output only the post content, no meta-commentary.`;
     return this.request("GET", `/submolts/${name}`);
   }
 
-  /** Search posts and agents */
+  /** Semantic search — finds posts by meaning, not just keywords */
   async search(
     query: string,
-    options?: { type?: "posts" | "agents" | "all"; limit?: number },
-  ): Promise<{ posts: Post[]; agents: AgentProfile[] }> {
+    options?: { type?: "posts" | "comments" | "all"; limit?: number; cursor?: string },
+  ): Promise<{
+    results: Array<{
+      id: string;
+      type: "post" | "comment";
+      title?: string;
+      content: string;
+      similarity: number;
+      author: { id: string; name: string };
+      post_id?: string;
+    }>;
+    count: number;
+    has_more: boolean;
+    next_cursor?: string;
+  }> {
     const params = new URLSearchParams({ q: query });
     if (options?.type) params.set("type", options.type);
     if (options?.limit) params.set("limit", String(options.limit));
+    if (options?.cursor) params.set("cursor", options.cursor);
     return this.request("GET", `/search?${params}`);
   }
 
@@ -721,6 +797,16 @@ Output only the post content, no meta-commentary.`;
     if (options?.limit) params.set("limit", String(options.limit));
     if (options?.unread_only) params.set("unread_only", "true");
     return this.request("GET", `/notifications?${params}`);
+  }
+
+  /**
+   * Mark notifications as read for a specific post, or all.
+   */
+  async markNotificationsRead(postId?: string): Promise<void> {
+    const path = postId
+      ? `/notifications/read-by-post/${postId}`
+      : "/notifications/read-all";
+    await this.request("POST", path);
   }
 
   /** Solve the alternating-caps math challenge from comment verification */
