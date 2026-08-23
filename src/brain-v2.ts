@@ -320,16 +320,16 @@ export class BrainV2 {
     decision: AgentDecision,
     context: {
       repliedPostCounts: Map<string, number>;
+      ownCommentCount: number;
       commentsToday: number;
       recentActions: string[];
       notificationAgentNames: string[];
     },
   ): Promise<{ valid: boolean; fallback?: string; reason: string }> {
-    // Hard safety valve — AI can't override this
+    // Hard safety valve — API-verified count, AI can't override this
     if (decision.action === "reply_to_comment" || decision.action === "comment") {
-      const postCount = context.repliedPostCounts.get("postId" in decision ? decision.postId : "") ?? 0;
-      if (postCount >= 5) {
-        return { valid: false, fallback: "scroll", reason: `Hard limit: already replied ${postCount} times to this post` };
+      if (context.ownCommentCount >= 5) {
+        return { valid: false, fallback: "scroll", reason: `Hard limit: you have ${context.ownCommentCount} comments on this post (API-verified)` };
       }
     }
 
@@ -360,12 +360,12 @@ export class BrainV2 {
     decision: AgentDecision,
     context: {
       repliedPostCounts: Map<string, number>;
+      ownCommentCount: number;
       commentsToday: number;
       recentActions: string[];
       notificationAgentNames: string[];
     },
   ): string {
-    const postCount = context.repliedPostCounts.get("postId" in decision ? decision.postId : "") ?? 0;
     const sections: string[] = [];
 
     sections.push("# Decision Revalidation Checkpoint");
@@ -386,7 +386,7 @@ export class BrainV2 {
     }
     sections.push("");
     sections.push("## Context");
-    sections.push(`- Replies to this post so far: ${postCount}`);
+    sections.push(`- Your comments on this post: ${context.ownCommentCount} (verified via API)`);
     sections.push(`- Comments today: ${context.commentsToday}/50`);
     sections.push(`- Recent actions: ${context.recentActions.slice(-5).join(", ") || "none yet"}`);
     if (context.notificationAgentNames.length > 0) {
@@ -395,7 +395,7 @@ export class BrainV2 {
     sections.push("");
     sections.push("## Rules");
     sections.push("- You may reply to the SAME post at most 2 times total (not counting this one)");
-    sections.push("- If you already replied twice to this post, reject unless it's a direct question to you");
+    sections.push("- If you already have 2+ comments on this post, reject unless it's a direct question to you");
     sections.push("- If the last 3 actions were all replies/comments, prefer scroll or upvote instead");
     sections.push("- Generic one-liner replies are noise — reject them");
     sections.push("- If the comment is spam (crypto, DEUSPROOF, generic praise), reject");

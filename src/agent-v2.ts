@@ -305,8 +305,26 @@ export class AgentV2 {
     console.log(`   Decision: ${decision.action} — ${decision.reason}`);
 
     // Phase 3: AI revalidates its own decision
+    // Fetch real comment count from API for reply/comment decisions
+    let ownCommentCount = 0;
+    if ((decision.action === "reply_to_comment" || decision.action === "comment") && "postId" in decision) {
+      try {
+        const commentsResult = await this.moltbookAgent.listComments(decision.postId, { sort: "old", limit: 100 });
+        if (commentsResult.ok) {
+          const comments = (commentsResult.value as any).comments ?? [];
+          ownCommentCount = comments.filter((c: any) => c.author?.name === "nimjiagent-sz945r").length;
+          // Sync in-memory count with reality
+          this.memory.repliedPostCounts.set(decision.postId, ownCommentCount);
+        }
+      } catch {
+        // API failed — fall back to in-memory count
+        ownCommentCount = this.memory.repliedPostCounts.get(decision.postId) ?? 0;
+      }
+    }
+
     const revalidation = await this.brain.revalidateDecision(decision, {
       repliedPostCounts: this.memory.repliedPostCounts,
+      ownCommentCount,
       commentsToday: this.memory.commentsToday,
       recentActions: this.memory.taskQueue.slice(-5).map((t) => `${t.type}: ${t.description}`),
       notificationAgentNames: notifications.filter((n) => n.agentName).map((n) => n.agentName!),
