@@ -102,10 +102,10 @@ describe("BrainV2", () => {
     });
   });
 
-  describe("buildContextPrompt", () => {
+  describe("buildSkillSelectionPrompt", () => {
     it("includes rate limit info", () => {
       const brain = new BrainV2({ gateway: buildMockGateway() as any, skillsDir: "skills" });
-      const prompt = brain.buildContextPrompt({
+      const prompt = brain.buildSkillSelectionPrompt({
         feed: [],
         notifications: [],
         rateLimits: { canPost: false, canComment: true, timeUntilPost: 900_000, timeUntilComment: 0, commentsToday: 3 },
@@ -122,7 +122,7 @@ describe("BrainV2", () => {
       const feed: FeedPost[] = [
         { id: "p1", title: "Test Post", submolt: "general", author: "bot1", upvotes: 10, comment_count: 5, createdAt: "" },
       ];
-      const prompt = brain.buildContextPrompt({
+      const prompt = brain.buildSkillSelectionPrompt({
         feed,
         notifications: [],
         rateLimits: defaultRateLimits(),
@@ -135,7 +135,7 @@ describe("BrainV2", () => {
 
     it("includes recent post types for dedup", () => {
       const brain = new BrainV2({ gateway: buildMockGateway() as any, skillsDir: "skills" });
-      const prompt = brain.buildContextPrompt({
+      const prompt = brain.buildSkillSelectionPrompt({
         feed: [],
         notifications: [],
         rateLimits: defaultRateLimits(),
@@ -151,7 +151,7 @@ describe("BrainV2", () => {
 
     it("includes notifications", () => {
       const brain = new BrainV2({ gateway: buildMockGateway() as any, skillsDir: "skills" });
-      const prompt = brain.buildContextPrompt({
+      const prompt = brain.buildSkillSelectionPrompt({
         feed: [],
         notifications: [{ type: "reply", message: "Nice post!", agentName: "bot2", postId: "p1", createdAt: "" }],
         rateLimits: defaultRateLimits(),
@@ -164,7 +164,7 @@ describe("BrainV2", () => {
 
     it("includes SKILL.md content", () => {
       const brain = new BrainV2({ gateway: buildMockGateway() as any, skillsDir: "skills" });
-      const prompt = brain.buildContextPrompt({
+      const prompt = brain.buildSkillSelectionPrompt({
         feed: [],
         notifications: [],
         rateLimits: defaultRateLimits(),
@@ -177,7 +177,7 @@ describe("BrainV2", () => {
   });
 
   describe("decide", () => {
-    it("calls gateway.generate with prompt", async () => {
+    it("calls gateway.generate twice (skill selection + decision)", async () => {
       const gw = buildMockGateway();
       const brain = new BrainV2({ gateway: gw as any, skillsDir: "skills" });
       await brain.decide({
@@ -187,13 +187,20 @@ describe("BrainV2", () => {
         postHistory: [],
         recentInteractions: [],
       });
-      assert.strictEqual(gw.generate.mock.calls.length, 1);
+      // Phase 1: skill selection, Phase 2: decision
+      assert.strictEqual(gw.generate.mock.calls.length, 2);
     });
 
     it("retries on malformed output", async () => {
       const gw = buildMockGateway();
-      // First call returns garbage, second returns valid JSON
-      gw.generate = mock.fn(async () => ({ text: "not json at all" }));
+      // Phase 1 returns valid skill selection, Phase 2 returns garbage, then retry returns valid
+      let callCount = 0;
+      gw.generate = mock.fn(async () => {
+        callCount++;
+        if (callCount === 1) return { text: '{"phase":"select_skill","skill":"engagement-strategy"}' };
+        if (callCount === 2) return { text: "not json at all" };
+        return { text: '{"action":"scroll","reason":"retry works"}' };
+      });
       const brain = new BrainV2({ gateway: gw as any, skillsDir: "skills" });
       const result = await brain.decide({
         feed: [],
@@ -202,15 +209,20 @@ describe("BrainV2", () => {
         postHistory: [],
         recentInteractions: [],
       });
-      // Should have retried (2 calls) and fallen back to scroll
-      assert.strictEqual(gw.generate.mock.calls.length, 2);
+      // 3 calls: skill selection + failed decision + retry decision
+      assert.strictEqual(gw.generate.mock.calls.length, 3);
       assert.strictEqual(result.action, "scroll");
-      assert.strictEqual(result.reason, "failed_to_parse_ai_output");
+      assert.strictEqual(result.reason, "retry works");
     });
 
     it("returns parsed decision on first attempt", async () => {
       const gw = buildMockGateway();
-      gw.generate = mock.fn(async () => ({ text: '{"action":"post","topic":"test","submolt":"general","postType":"discovery","reason":"testing"}' }));
+      let callCount = 0;
+      gw.generate = mock.fn(async () => {
+        callCount++;
+        if (callCount === 1) return { text: '{"phase":"select_skill","skill":"post-discovery"}' };
+        return { text: '{"action":"post","topic":"test","submolt":"general","postType":"discovery","reason":"testing"}' };
+      });
       const brain = new BrainV2({ gateway: gw as any, skillsDir: "skills" });
       const result = await brain.decide({
         feed: [],
@@ -219,7 +231,7 @@ describe("BrainV2", () => {
         postHistory: [],
         recentInteractions: [],
       });
-      assert.strictEqual(gw.generate.mock.calls.length, 1);
+      assert.strictEqual(gw.generate.mock.calls.length, 2);
       assert.strictEqual(result.action, "post");
     });
   });

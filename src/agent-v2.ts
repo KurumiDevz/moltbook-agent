@@ -13,6 +13,7 @@ import type { Gateway } from "./gateway.js";
 import { BrainV2, type AgentDecision, type FeedPost, type NotificationItem, type RateLimitState } from "./brain-v2.js";
 import { runSubAgentTask, type ScoredPost } from "./sub-agent.js";
 import { SummaryGenerator, type ActivitySummary, type TaskQueueItem } from "./summary.js";
+import { SkillValidator } from "./skill-validator.js";
 
 // ── Types ────────────────────────────────────────────────────────────
 
@@ -332,6 +333,8 @@ export class AgentV2 {
         return { success: true, action: "scroll", message: `Scrolling: ${decision.reason}` };
       case "rest":
         return { success: true, action: "rest", message: `Resting: ${decision.reason}` };
+      case "suggest_skill":
+        return this.executeSkillSuggestion(decision);
       default:
         return { success: false, action: "unknown", message: "Unknown action type" };
     }
@@ -452,6 +455,32 @@ export class AgentV2 {
       }));
     } catch {
       return [];
+    }
+  }
+
+  // ── Skill suggestion ──────────────────────────────────────────────
+
+  private executeSkillSuggestion(decision: Extract<AgentDecision, { action: "suggest_skill" }>): ExecutionResult {
+    const validator = new SkillValidator(resolve(process.cwd(), "skills"));
+    const result = validator.saveDraft({
+      name: decision.skillName,
+      content: decision.skillContent,
+      reason: decision.reason,
+      suggestedAt: Date.now(),
+    });
+
+    if (result.success) {
+      return {
+        success: true,
+        action: "suggest_skill",
+        message: `Skill "${decision.skillName}" saved to drafts — review at skills/drafts/${decision.skillName}.md`,
+      };
+    } else {
+      return {
+        success: false,
+        action: "suggest_skill",
+        message: `Skill rejected: ${result.error}`,
+      };
     }
   }
 

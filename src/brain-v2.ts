@@ -1,19 +1,18 @@
 /**
- * Brain V2 — Prompt-driven agent intelligence.
+ * Brain V2 — Prompt-driven agent intelligence with skill selection.
  *
- * Loads skills from skills/ directory, builds context prompts from
- * memory/feed state + compact activity summary, sends to AI, parses
- * structured JSON decisions.
+ * Two-phase decide:
+ *   Phase 1: AI selects which skill to use (sees context + skill list)
+ *   Phase 2: AI makes decision (sees context + full skill content)
  *
- * Replaces the old brain/ + personality.ts + decision.ts + observer.ts
- * with a single prompt-driven approach.
+ * Skills are .md files in the skills/ directory. Each teaches ONE behavior.
  */
 
 import { readFileSync } from "node:fs";
 import { resolve } from "node:path";
 import type { Gateway } from "./gateway.js";
 import { SkillLoader, type Skill } from "./skill-loader.js";
-import type { ActivitySummary } from "./summary.js";
+import { getRelevantDocs } from "./context7.js";
 
 // ── Types ────────────────────────────────────────────────────────────
 
@@ -24,7 +23,8 @@ export type AgentDecision =
   | { action: "downvote"; postId: string; reason: string }
   | { action: "follow"; agentName: string; reason: string }
   | { action: "scroll"; reason: string }
-  | { action: "rest"; reason: string };
+  | { action: "rest"; reason: string }
+  | { action: "suggest_skill"; skillName: string; skillContent: string; reason: string };
 
 export type FeedPost = {
   id: string;
@@ -48,18 +48,29 @@ export type NotificationItem = {
 export type RateLimitState = {
   canPost: boolean;
   canComment: boolean;
-  timeUntilPost: number; // ms
-  timeUntilComment: number; // ms
+  timeUntilPost: number;
+  timeUntilComment: number;
   commentsToday: number;
 };
 
 export type BrainV2Config = {
   gateway: Gateway;
   model?: string;
-  /** Path to a specific skill file (default: load all from skills/) */
   skillPath?: string;
-  /** Skills directory (default: ./skills) */
   skillsDir?: string;
+};
+
+// ── Skill descriptions (short, for Phase 1 selection) ───────────────
+
+const SKILL_DESCRIPTIONS: Record<string, string> = {
+  "post-discovery": "Found something interesting, scanned a codebase, uncovered a pattern",
+  "post-workflow": "Have a process worth sharing — something you do regularly",
+  "post-vulnerability": "Something failed and you learned from it",
+  "post-challenge": "See something broken and have a concrete proposal",
+  "post-data-drop": "Have numbers that tell a story — metrics, benchmarks, data",
+  "comment-quality": "About to comment on someone's post",
+  "engagement-strategy": "Deciding what to do next — post, comment, scroll, rest",
+  "moltbook-rules": "Hard rules: rate limits, content rules, prohibited behavior",
 };
 
 // ── BrainV2 ──────────────────────────────────────────────────────────
@@ -67,60 +78,55 @@ export type BrainV2Config = {
 export class BrainV2 {
   private gateway: Gateway;
   private model: string;
-  private skillContent: string;
-  private skills: Skill[];
+  private coreSkill: Skill;
+  private allSkills: Map<string, Skill>;
 
   constructor(config: BrainV2Config) {
     this.gateway = config.gateway;
     this.model = config.model ?? "auto";
+    this.allSkills = new Map();
 
-    // Load skills from skills/ directory
     const loader = new SkillLoader({ skillsDir: config.skillsDir });
 
     if (config.skillPath) {
-      // Load specific skill file
-      this.skillContent = readFileSync(config.skillPath, "utf-8");
-      this.skills = [{ name: "custom", path: config.skillPath, content: this.skillContent }];
+      // Single skill mode (backwards compatible)
+      const content = readFileSync(config.skillPath, "utf-8");
+      this.coreSkill = { name: "custom", path: config.skillPath, content };
+      this.allSkills.set("custom", this.coreSkill);
     } else {
       // Load all skills from directory
-      this.skills = loader.loadAll();
-      if (this.skills.length === 0) {
-        // Fallback: try loading from project root
+      const skills = loader.loadAll();
+
+      if (skills.length === 0) {
+        // Fallback
         try {
           const fallback = readFileSync(resolve(process.cwd(), "SKILL.md"), "utf-8");
-          this.skillContent = fallback;
-          this.skills = [{ name: "fallback", path: "SKILL.md", content: fallback }];
+          this.coreSkill = { name: "fallback", path: "SKILL.md", content: fallback };
         } catch {
-          this.skillContent = "# No skill loaded. You are a Moltbook agent. Be helpful.";
-          this.skills = [];
+          this.coreSkill = { name: "empty", path: "", content: "# No skill loaded." };
         }
+        this.allSkills.set(this.coreSkill.name, this.coreSkill);
       } else {
-        // Use the first skill as primary (or find "nimjiagent")
-        const primary = this.skills.find((s) => s.name === "nimjiagent") ?? this.skills[0];
-        this.skillContent = primary.content;
+        // Core skill is nimjiagent (or first)
+        this.coreSkill = skills.find((s) => s.name === "nimjiagent") ?? skills[0];
+        for (const s of skills) {
+          this.allSkills.set(s.name, s);
+        }
       }
     }
   }
 
-  /**
-   * Build the full prompt for the AI decision cycle.
-   * Combines skill instructions with current context + activity summary.
-   */
-  buildContextPrompt(context: {
+  /** Build the context section (shared between both phases). */
+  private buildBaseContext(context: {
     feed: FeedPost[];
     notifications: NotificationItem[];
     rateLimits: RateLimitState;
     postHistory: Array<{ type: string; submolt: string; upvotes: number; timestamp: number }>;
     recentInteractions: string[];
-    summary?: string; // compact activity summary from sub-agent
+    summary?: string;
   }): string {
     const sections: string[] = [];
 
-    // 1. Skill instructions (the brain)
-    sections.push(this.skillContent);
-    sections.push("");
-
-    // 2. Current state
     sections.push("## Current State");
     sections.push(`- Time: ${new Date().toISOString()}`);
     sections.push(`- Posts today: ${context.postHistory.length}`);
@@ -129,7 +135,6 @@ export class BrainV2 {
     sections.push(`- Can comment: ${context.rateLimits.canComment}${context.rateLimits.canComment ? "" : ` (wait ${Math.ceil(context.rateLimits.timeUntilComment / 1000)}s)`}`);
     sections.push("");
 
-    // 3. Recent post types (avoid repetition)
     if (context.postHistory.length > 0) {
       const recentTypes = context.postHistory.slice(-5).map((p) => p.type);
       const recentSubmolts = context.postHistory.slice(-5).map((p) => p.submolt);
@@ -139,13 +144,11 @@ export class BrainV2 {
       sections.push("");
     }
 
-    // 4. Activity summary (compact index from sub-agent)
     if (context.summary) {
       sections.push(context.summary);
       sections.push("");
     }
 
-    // 5. Feed (top posts to engage with)
     if (context.feed.length > 0) {
       sections.push("## Feed (top posts right now)");
       for (const post of context.feed.slice(0, 10)) {
@@ -154,7 +157,6 @@ export class BrainV2 {
       sections.push("");
     }
 
-    // 5. Notifications
     if (context.notifications.length > 0) {
       sections.push("## Notifications");
       for (const n of context.notifications.slice(0, 10)) {
@@ -163,19 +165,81 @@ export class BrainV2 {
       sections.push("");
     }
 
-    // 6. Decision prompt
+    return sections.join("\n");
+  }
+
+  /** Phase 1: Build prompt for skill selection. */
+  buildSkillSelectionPrompt(context: {
+    feed: FeedPost[];
+    notifications: NotificationItem[];
+    rateLimits: RateLimitState;
+    postHistory: Array<{ type: string; submolt: string; upvotes: number; timestamp: number }>;
+    recentInteractions: string[];
+    summary?: string;
+  }): string {
+    const sections: string[] = [];
+
+    // Core identity
+    sections.push(this.coreSkill.content);
+    sections.push("");
+
+    // Context
+    sections.push(this.buildBaseContext(context));
+
+    // Skill selection prompt
+    sections.push("## Skill Selection");
+    sections.push("Choose the ONE skill that best matches your current situation.");
+    sections.push("Respond with ONLY a JSON object:");
+    sections.push("");
+    sections.push('```json');
+    sections.push('{ "phase": "select_skill", "skill": "skill-name", "reason": "why" }');
+    sections.push('```');
+    sections.push("");
+
+    return sections.join("\n");
+  }
+
+  /** Phase 2: Build prompt for decision with selected skill. */
+  buildDecisionPrompt(
+    context: {
+      feed: FeedPost[];
+      notifications: NotificationItem[];
+      rateLimits: RateLimitState;
+      postHistory: Array<{ type: string; submolt: string; upvotes: number; timestamp: number }>;
+      recentInteractions: string[];
+      summary?: string;
+    },
+    skillName: string,
+  ): string {
+    const sections: string[] = [];
+
+    // Core identity
+    sections.push(this.coreSkill.content);
+    sections.push("");
+
+    // Selected skill content
+    const skill = this.allSkills.get(skillName);
+    if (skill) {
+      sections.push(skill.content);
+      sections.push("");
+    }
+
+    // Context
+    sections.push(this.buildBaseContext(context));
+
+    // Decision prompt
     sections.push("## Your Decision");
-    sections.push("Based on the above, choose ONE action. Respond with ONLY a JSON object.");
-    sections.push("If you want to create a post, include title and body in the JSON.");
-    sections.push("If you want to comment, include the content in the JSON.");
+    sections.push("Based on the above and the loaded skill, choose ONE action.");
+    sections.push("Respond with ONLY a JSON object. No markdown, no explanation.");
     sections.push("");
 
     return sections.join("\n");
   }
 
   /**
-   * Send context to AI and parse the JSON decision.
-   * Retries once if output isn't valid JSON.
+   * Two-phase decide:
+   *   Phase 1: AI selects skill (sees context + skill list)
+   *   Phase 2: AI makes decision (sees context + skill content)
    */
   async decide(context: {
     feed: FeedPost[];
@@ -183,21 +247,38 @@ export class BrainV2 {
     rateLimits: RateLimitState;
     postHistory: Array<{ type: string; submolt: string; upvotes: number; timestamp: number }>;
     recentInteractions: string[];
+    summary?: string;
   }): Promise<AgentDecision> {
-    const prompt = this.buildContextPrompt(context);
+    // Fetch Context7 docs (shared across both phases)
+    const context7Docs = await this.fetchContext7Docs(context.feed);
 
-    // First attempt
-    const result = await this.gateway.generate({
-      prompt,
+    // ── Phase 1: Skill selection ──
+    let skillSelectionPrompt = this.buildSkillSelectionPrompt(context);
+    if (context7Docs) skillSelectionPrompt += context7Docs;
+
+    const phase1 = await this.gateway.generate({
+      prompt: skillSelectionPrompt,
+      model: this.model,
+      maxTokens: 200,
+    });
+
+    const selectedSkill = this.parseSkillSelection(phase1.text);
+
+    // ── Phase 2: Decision with selected skill ──
+    let decisionPrompt = this.buildDecisionPrompt(context, selectedSkill);
+    if (context7Docs) decisionPrompt += context7Docs;
+
+    const phase2 = await this.gateway.generate({
+      prompt: decisionPrompt,
       model: this.model,
       maxTokens: 2000,
     });
 
-    const parsed = this.parseDecision(result.text);
+    const parsed = this.parseDecision(phase2.text);
     if (parsed) return parsed;
 
     // Retry with explicit instruction
-    const retryPrompt = prompt +
+    const retryPrompt = decisionPrompt +
       "\n\n**IMPORTANT**: Your previous response was not valid JSON. " +
       "You MUST respond with ONLY a JSON object like {\"action\": \"scroll\", \"reason\": \"...\"}. " +
       "No markdown, no explanation, no other text.";
@@ -211,23 +292,38 @@ export class BrainV2 {
     const retryParsed = this.parseDecision(retry.text);
     if (retryParsed) return retryParsed;
 
-    // Fallback to scroll
     return { action: "scroll", reason: "failed_to_parse_ai_output" };
   }
 
-  /**
-   * Parse AI output into a structured decision.
-   * Handles markdown code blocks, extra text, etc.
-   */
-  parseDecision(text: string): AgentDecision | null {
-    if (!text) return null;
+  /** Parse skill selection from Phase 1 output. Falls back to "engagement-strategy". */
+  parseSkillSelection(text: string): string {
+    if (!text) return "engagement-strategy";
 
-    // Strip markdown code blocks
     let cleaned = text.trim();
     cleaned = cleaned.replace(/^```(?:json)?\s*/i, "").replace(/\s*```$/i, "");
     cleaned = cleaned.trim();
 
-    // Try to find JSON object in the text
+    const jsonMatch = cleaned.match(/\{[\s\S]*\}/);
+    if (!jsonMatch) return "engagement-strategy";
+
+    try {
+      const obj = JSON.parse(jsonMatch[0]);
+      if (typeof obj.skill === "string" && this.allSkills.has(obj.skill)) {
+        return obj.skill;
+      }
+    } catch { /* fall through */ }
+
+    return "engagement-strategy";
+  }
+
+  /** Parse AI output into a structured decision. */
+  parseDecision(text: string): AgentDecision | null {
+    if (!text) return null;
+
+    let cleaned = text.trim();
+    cleaned = cleaned.replace(/^```(?:json)?\s*/i, "").replace(/\s*```$/i, "");
+    cleaned = cleaned.trim();
+
     const jsonMatch = cleaned.match(/\{[\s\S]*\}/);
     if (!jsonMatch) return null;
 
@@ -239,9 +335,6 @@ export class BrainV2 {
     }
   }
 
-  /**
-   * Validate that a parsed object is a valid AgentDecision.
-   */
   private validateDecision(obj: unknown): AgentDecision | null {
     if (!obj || typeof obj !== "object" || !("action" in obj)) return null;
 
@@ -305,8 +398,49 @@ export class BrainV2 {
           reason: typeof d.reason === "string" ? d.reason : "ai_decided",
         };
 
+      case "suggest_skill":
+        if (typeof d.skillName !== "string" || typeof d.skillContent !== "string") return null;
+        return {
+          action: "suggest_skill",
+          skillName: d.skillName,
+          skillContent: d.skillContent,
+          reason: typeof d.reason === "string" ? d.reason : "ai_decided",
+        };
+
       default:
         return null;
     }
+  }
+
+  private async fetchContext7Docs(feed: FeedPost[]): Promise<string | null> {
+    const knownLibraries = [
+      "react", "nextjs", "next.js", "vue", "angular", "svelte",
+      "langchain", "openai", "anthropic", "gemini",
+      "pinecone", "chromadb", "prisma", "drizzle",
+      "express", "fastify", "hono",
+      "typescript", "python", "rust", "go", "node.js", "node",
+      "docker", "kubernetes", "terraform", "aws", "gcp", "azure",
+      "redis", "postgres", "mongodb", "sqlite",
+      "vercel", "cloudflare",
+    ];
+
+    const mentions = new Set<string>();
+    for (const post of feed.slice(0, 10)) {
+      const text = (post.title + " " + (post.content ?? "")).toLowerCase();
+      for (const lib of knownLibraries) {
+        if (text.includes(lib)) mentions.add(lib);
+      }
+    }
+
+    if (mentions.size === 0) return null;
+
+    const lib = [...mentions][0];
+    try {
+      const doc = await getRelevantDocs(lib, lib, { tokens: 1500 });
+      if (doc) {
+        return `\n\n## Context7 Docs (${doc.library})\n${doc.content.slice(0, 1500)}\nUse this for accurate version numbers, API names, and code examples.`;
+      }
+    } catch { /* Context7 unavailable */ }
+    return null;
   }
 }
