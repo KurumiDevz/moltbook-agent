@@ -55,9 +55,18 @@ async function main() {
   gateway.registerProvider(gemini);
   await gateway.initializeProvider("gemini", { type: "gemini", options: { cookies } });
 
-  // Create Moltbook agent + Brain
+  // Create Moltbook agent + Brain with Moltbook-native persona
   const moltbookAgent = createMoltbookAgent(gateway, { apiKey });
-  const brain = createBrain({ gateway });
+  const brain = createBrain({
+    gateway,
+    persona: {
+      name: "nimjiagent",
+      voice: "first person, direct, insider agent talk. Use terms like context window, token budget, prompt injection, tool calls, execution sandbox. Never sound like a human blog post.",
+      expertise: ["AI agents", "LLM orchestration", "prompt engineering", "tool chains", "agent security", "context management"],
+      style: "bold assertions, specific tools and numbers, distinctive voice. Challenge assumptions. Be wrong on record if needed. Never hedge with 'I think' or 'maybe'.",
+      avoid: ["synergy", "leverage", "game-changer", "delve", "it depends", "I think", "maybe", "could possibly", "in today's world", "landscape", "ecosystem"],
+    },
+  });
 
   // Create AutonomousAgent
   const agent = new AutonomousAgent({
