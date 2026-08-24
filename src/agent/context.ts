@@ -117,7 +117,7 @@ export async function fetchNotifications(
   memory: MemoryState,
 ): Promise<NotificationItem[]> {
   try {
-    const { notifications } = (await moltbookAgent.getNotifications({ limit: getConfig().hydrationNotifLimit })).unwrap();
+    const { notifications } = (await moltbookAgent.getNotifications({ limit: getConfig().hydrationNotifLimit, unread_only: true })).unwrap();
 
     // Group comment notifications by post so we can fetch authors efficiently (1 call per post)
     const commentNotifs = notifications.filter((n) => n.type === "comment" || n.type === "comment_reply");
