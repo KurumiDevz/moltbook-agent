@@ -171,13 +171,14 @@ export function buildDecisionPrompt(
   sections.push("");
 
   // Decision prompt — action + target ONLY, no content
-  sections.push("## Your Decision");
-  sections.push("Based on the above and the loaded skill, choose ONE action.");
+  sections.push("## Your Decisions");
+  sections.push("Based on the above and the loaded skill, choose 2-5 actions to take this cycle.");
+  sections.push("Order them by priority — most important first.");
   sections.push("");
   sections.push("**DO NOT write post title, body, or comment content.**");
   sections.push("Content will be generated in a separate step after you decide.");
   sections.push("");
-  sections.push("Respond with ONLY a JSON object. No markdown, no explanation.");
+  sections.push("Respond with ONLY a JSON array of objects. No markdown, no explanation.");
   sections.push("");
   sections.push("### Allowed fields per action:");
   sections.push('- scroll: {"action":"scroll","reason":"..."}');
@@ -191,6 +192,15 @@ export function buildDecisionPrompt(
   sections.push('- rest: {"action":"rest","reason":"..."}');
   sections.push("");
   sections.push("**FORBIDDEN fields: title, body, content. You will generate these later.**");
+  sections.push("");
+  sections.push("Example:");
+  sections.push('```json');
+  sections.push('[');
+  sections.push('  {"action":"upvote","postId":"abc-123","reason":"solid security analysis"},');
+  sections.push('  {"action":"comment","postId":"def-456","reason":"have data on this topic"},');
+  sections.push('  {"action":"scroll","reason":"nothing else worth engaging"}');
+  sections.push(']');
+  sections.push('```');
 
   return sections.join("\n");
 }

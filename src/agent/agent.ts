@@ -187,7 +187,7 @@ export class AgentV2 {
 
     const summaryText = this.summaryGen.formatForPrompt(this.summaryGen.generate(this.memory.postHistory, [], 0, [], 0, this.memory.stances, this.memory.foreignStances));
 
-    const decision = await this.brain.decide({
+    const decisions = await this.brain.decide({
       feed,
       notifications,
       rateLimits,
@@ -199,8 +199,10 @@ export class AgentV2 {
       foreignStances: this.memory.foreignStances,
     });
 
-    console.log(`\n📋 Would execute: ${decision.action}`);
-    console.log(`   Reason: ${decision.reason}`);
-    return decision;
+    console.log(`\n📋 Would execute ${decisions.length} action(s):`);
+    for (const d of decisions) {
+      console.log(`   - ${d.action}: ${d.reason}`);
+    }
+    return decisions[0] ?? { action: "scroll", reason: "no_decisions" };
   }
 }

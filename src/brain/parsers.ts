@@ -53,6 +53,37 @@ export function parseDecision(text: string): AgentDecision | null {
   }
 }
 
+/** Parse AI output into multiple decisions. Returns array (1-5 decisions). */
+export function parseDecisions(text: string): AgentDecision[] {
+  if (!text) return [];
+
+  let cleaned = text.trim();
+  cleaned = cleaned.replace(/^```(?:json)?\s*/i, "").replace(/\s*```$/i, "");
+  cleaned = cleaned.trim();
+
+  // Try array first
+  const arrayMatch = cleaned.match(/\[[\s\S]*\]/);
+  if (arrayMatch) {
+    try {
+      const arr = JSON.parse(arrayMatch[0]);
+      if (Array.isArray(arr)) {
+        const decisions: AgentDecision[] = [];
+        for (const item of arr.slice(0, 5)) {
+          const d = validateDecision(item);
+          if (d) decisions.push(d);
+        }
+        return decisions;
+      }
+    } catch {
+      /* fall through */
+    }
+  }
+
+  // Fallback: try single object
+  const single = parseDecision(text);
+  return single ? [single] : [];
+}
+
 /** Type-narrow parsed object into typed AgentDecision. */
 export function validateDecision(obj: unknown): AgentDecision | null {
   if (!obj || typeof obj !== "object" || !("action" in obj)) return null;

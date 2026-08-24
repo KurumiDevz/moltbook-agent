@@ -23,7 +23,7 @@ export type { FeedPost, NotificationItem, RateLimitState, AgentDecision } from "
 
 import type { BrainV2Config } from "./types.js";
 import { buildSkillSelectionPrompt, buildDecisionPrompt, buildContentPrompt, buildRevalidationPrompt, buildPostRevalidationPrompt, type BrainContext } from "./prompts.js";
-import { parseSkillSelection, parseDecision, parseContentResponse, parseRevalidation } from "./parsers.js";
+import { parseSkillSelection, parseDecision, parseDecisions, parseContentResponse, parseRevalidation } from "./parsers.js";
 
 export class BrainV2 {
   private gateway: Gateway;
@@ -69,11 +69,10 @@ export class BrainV2 {
   /**
    * Three-phase decide:
    *   Phase 1: AI selects skill (sees context + skill list)
-   *   Phase 2a: AI decides action + target (stateless, no content)
-   *   Phase 2b: AI generates content (routed to per-post conversation)
-   *   Phase 3: AI revalidates decision (see revalidateDecision())
+   *   Phase 2a: AI decides actions + targets (stateless, no content) — returns 2-5 decisions
+   *   Phase 2b: AI generates content for each decision (routed to per-post conversation)
    */
-  async decide(context: BrainContext): Promise<AgentDecision> {
+  async decide(context: BrainContext): Promise<AgentDecision[]> {
     // Fetch Context7 docs (shared across both phases)
     const context7Docs = await this.fetchContext7Docs(context.feed);
 
@@ -90,56 +89,56 @@ export class BrainV2 {
     const skillNames = new Set(this.allSkills.keys());
     const selectedSkill = parseSkillSelection(phase1.text, skillNames);
 
-    // ── Phase 2a: Decide action + target (stateless) ──
+    // ── Phase 2a: Decide actions + targets (stateless) — returns array ──
     let decisionPrompt = buildDecisionPrompt(context, selectedSkill, this.coreSkill, this.allSkills);
     if (context7Docs) decisionPrompt += context7Docs;
 
     const phase2a = await this.gateway.generate({
       prompt: decisionPrompt,
       model: this.model,
-      maxTokens: 500,
+      maxTokens: 1500, // Increased for multiple decisions
     });
 
-    const preliminary = parseDecision(phase2a.text);
+    let decisions = parseDecisions(phase2a.text);
 
-    if (!preliminary) {
+    if (decisions.length === 0) {
       // Retry once with explicit instruction
       const retryPrompt =
         decisionPrompt +
-        "\n\n**IMPORTANT**: Your previous response was not valid JSON. " +
-        'You MUST respond with ONLY a JSON object like {"action": "scroll", "reason": "..."}. ' +
+        "\n\n**IMPORTANT**: Your previous response was not valid JSON array. " +
+        'You MUST respond with ONLY a JSON array like [{"action": "scroll", "reason": "..."}]. ' +
         "No markdown, no explanation, no other text.";
 
       const retry = await this.gateway.generate({
         prompt: retryPrompt,
         model: this.model,
-        maxTokens: 500,
+        maxTokens: 1500,
       });
 
-      const retryParsed = parseDecision(retry.text);
-      if (retryParsed) {
-        // If retry needs content, continue to Phase 2b
-        if (this.needsContentGeneration(retryParsed)) {
-          return this.generateContent(retryParsed, context, selectedSkill, context7Docs);
-        }
-        return retryParsed;
+      decisions = parseDecisions(retry.text);
+      if (decisions.length === 0) {
+        return [{ action: "scroll", reason: "failed_to_parse_ai_output" }];
       }
-
-      return { action: "scroll", reason: "failed_to_parse_ai_output" };
     }
 
     // ── Phase 2b: Generate content for actions that need it ──
-    if (this.needsContentGeneration(preliminary)) {
-      return this.generateContent(preliminary, context, selectedSkill, context7Docs);
+    const results: AgentDecision[] = [];
+    for (const decision of decisions) {
+      if (this.needsContentGeneration(decision)) {
+        const withContent = await this.generateContent(decision, context, selectedSkill, context7Docs);
+        results.push(withContent);
+      } else {
+        results.push(decision);
+      }
     }
 
-    return preliminary;
+    return results;
   }
 
   /** Check if a decision needs Phase 2b content generation. */
   private needsContentGeneration(decision: AgentDecision): boolean {
     // Always route these through Phase 2b — AI should NOT generate content in Phase 2a
-    if (decision.action === "comment" || decision.action === "reply_to_comment" || decision.action === "post") {
+    if (decision.action === "comment" || decision.action === "reply_to_comment" || decision.action === "join_conversation" || decision.action === "post") {
       return true;
     }
     return false;

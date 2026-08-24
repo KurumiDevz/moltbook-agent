@@ -290,9 +290,9 @@ export async function runCycle(deps: CycleDeps): Promise<CycleResult> {
     saveMyPost({ postId: p.id, title: p.title, type: "post", submolt: p.submolt?.name ?? "" });
   }
 
-  // 4. AI decides
+  // 4. AI decides — returns 2-5 actions
   console.log("🤔 AI deciding...");
-  const decision = await brain.decide({
+  const decisions = await brain.decide({
     feed: scoredFeed,
     notifications,
     rateLimits,
@@ -304,122 +304,103 @@ export async function runCycle(deps: CycleDeps): Promise<CycleResult> {
     foreignStances: memory.foreignStances,
   });
 
-  console.log(`   Decision: ${decision.action} — ${decision.reason}`);
+  console.log(`   Decisions: ${decisions.length} action(s) — ${decisions.map((d) => d.action).join(", ")}`);
 
-  // Phase 3: AI revalidates its own decision
-  let ownCommentCount = 0;
-  if ((decision.action === "reply_to_comment" || decision.action === "comment" || decision.action === "join_conversation") && "postId" in decision) {
-    try {
-      const commentsResult = await moltbookAgent.listComments(decision.postId, { sort: "old", limit: 100 });
-      if (commentsResult.ok) {
-        const comments = (commentsResult.value as any).comments ?? [];
-        ownCommentCount = comments.filter((c: any) => c.author?.name === getConfig().agentName).length;
-        memory.repliedThreadCounts.set(decision.postId, ownCommentCount);
+  // 5. Execute each decision (looser revalidation — just rate limits + basic checks)
+  const results: ExecutionResult[] = [];
+  for (const decision of decisions) {
+    // Rate limit check — skip actions that are rate limited
+    if (decision.action === "post" && !rateLimits.canPost) {
+      console.log(`   ⏭ Skipping post — rate limited`);
+      continue;
+    }
+    if ((decision.action === "comment" || decision.action === "reply_to_comment" || decision.action === "join_conversation") && !rateLimits.canComment) {
+      console.log(`   ⏭ Skipping ${decision.action} — rate limited`);
+      continue;
+    }
+
+    // Per-post comment cap check
+    if ((decision.action === "comment" || decision.action === "reply_to_comment" || decision.action === "join_conversation") && "postId" in decision) {
+      const postCommentCount = memory.repliedPostCounts.get(decision.postId) ?? 0;
+      if (postCommentCount >= MAX_COMMENTS_PER_POST) {
+        console.log(`   ⏭ Skipping ${decision.action} — already ${postCommentCount}x comments on post ${decision.postId}`);
+        continue;
       }
-    } catch {
-      ownCommentCount = memory.repliedThreadCounts.get(decision.postId) ?? 0;
     }
-  }
 
-  const revalidation = await brain.revalidateDecision(decision, {
-    repliedThreadCounts: memory.repliedThreadCounts,
-    ownCommentCount,
-    commentsToday: memory.commentsToday,
-    recentActions: memory.taskQueue
-      .filter((t) => !t.result?.includes("too short"))
-      .slice(-5)
-      .map((t) => `${t.type}: ${t.description}`),
-    notificationAgentNames: notifications.filter((n) => n.agentName).map((n) => n.agentName!),
-    recentTitles: memory.postHistory.slice(-10).map((p) => p.title ?? ""),
-    recentTopics: memory.postHistory.slice(-10).map((p) => p.type),
-    postsToday: memory.postHistory.length,
-  });
+    // Already replied check
+    if ((decision.action === "reply_to_comment" || decision.action === "join_conversation") && "commentId" in decision) {
+      if (memory.repliedCommentIds.has(decision.commentId)) {
+        console.log(`   ⏭ Skipping ${decision.action} — already replied to comment ${decision.commentId}`);
+        continue;
+      }
+    }
 
-  let finalDecision = decision;
-  if (!revalidation.valid) {
-    console.log(`   🛑 Revalidation rejected: ${revalidation.reason}`);
-    finalDecision = {
-      action: (revalidation.fallback ?? "scroll") as AgentDecision["action"],
-      reason: revalidation.reason,
-    } as AgentDecision;
-  }
+    console.log(`   ⚡ Executing: ${decision.action} — ${decision.reason}`);
 
-  // 5. Add task to queue
-  const task = summaryGen.addTask(
-    memory.taskQueue,
-    finalDecision.action === "post"
-      ? "post"
-      : finalDecision.action === "comment"
-        ? "comment"
-        : finalDecision.action === "reply_to_comment" || finalDecision.action === "join_conversation"
-          ? "comment"
-          : finalDecision.action === "upvote"
-            ? "upvote"
-            : finalDecision.action === "follow"
-              ? "follow"
-              : "engage",
-    finalDecision.reason,
-    finalDecision.action === "post"
-      ? finalDecision.topic
-      : finalDecision.action === "comment"
-        ? finalDecision.postId
-        : finalDecision.action === "reply_to_comment" || finalDecision.action === "join_conversation"
-          ? finalDecision.postId
-          : finalDecision.action === "upvote"
-            ? finalDecision.postId
-            : finalDecision.action === "follow"
-              ? finalDecision.agentName
-              : undefined,
-  );
-
-  // Persist pending task immediately (crash resilience)
-  try {
-    const preExecSummary = summaryGen.generate(
-      memory.postHistory,
-      [],
-      0,
+    // Add task to queue
+    const task = summaryGen.addTask(
       memory.taskQueue,
-      cycleCount,
-      memory.stances,
-      memory.foreignStances,
-      Object.fromEntries(memory.repliedThreadCounts),
-      Object.fromEntries(memory.repliedPostCounts),
-      [...memory.repliedCommentIds],
-      memory.postHistory,
+      decision.action === "post"
+        ? "post"
+        : decision.action === "comment"
+          ? "comment"
+          : decision.action === "reply_to_comment" || decision.action === "join_conversation"
+            ? "comment"
+            : decision.action === "upvote"
+              ? "upvote"
+              : decision.action === "follow"
+                ? "follow"
+                : "engage",
+      decision.reason,
+      decision.action === "post"
+        ? decision.topic
+        : decision.action === "comment"
+          ? decision.postId
+          : decision.action === "reply_to_comment" || decision.action === "join_conversation"
+            ? decision.postId
+            : decision.action === "upvote"
+              ? decision.postId
+              : decision.action === "follow"
+                ? decision.agentName
+                : undefined,
     );
-    summaryGen.save(preExecSummary);
-    lastSummary = preExecSummary;
-  } catch {
-    /* best effort */
-  }
 
-  // 6. Execute
-  console.log("⚡ Executing...");
-  const result = await executeAction(finalDecision, {
-    moltbookAgent,
-    gateway,
-    brain,
-    memory,
-  });
-  const emoji = result.success ? "✅" : "❌";
-  console.log(`   ${emoji} ${result.message}`);
+    // Execute
+    const result = await executeAction(decision, {
+      moltbookAgent,
+      gateway,
+      brain,
+      memory,
+    });
 
-  // 6b. Mark notifications as read after acting
-  if (result.success && finalDecision.action !== "scroll" && "postId" in finalDecision) {
-    const markResult = await moltbookAgent.markNotificationsRead(finalDecision.postId);
-    if (!markResult.ok) {
-      console.log(`   ⚠ markNotificationsRead failed: ${markResult.error.status} ${String(markResult.error.responseBody).slice(0, 200)}`);
+    const emoji = result.success ? "✅" : "❌";
+    console.log(`   ${emoji} ${result.message}`);
+
+    // Mark notifications as read after acting
+    if (result.success && decision.action !== "scroll" && "postId" in decision) {
+      const markResult = await moltbookAgent.markNotificationsRead(decision.postId);
+      if (!markResult.ok) {
+        console.log(`   ⚠ markNotificationsRead failed: ${markResult.error.status} ${String(markResult.error.responseBody).slice(0, 200)}`);
+      }
     }
+
+    // Update task status
+    if (result.success) {
+      summaryGen.completeTask(memory.taskQueue, task.id, result.message);
+    } else {
+      summaryGen.failTask(memory.taskQueue, task.id, result.message);
+    }
+
+    results.push(result);
   }
 
-  // 7. Update task status
-  if (result.success) {
-    summaryGen.completeTask(memory.taskQueue, task.id, result.message);
-  } else {
-    summaryGen.failTask(memory.taskQueue, task.id, result.message);
-  }
+  // Return the first result for backward compatibility (or combined result)
+  const firstResult = results.length > 0
+    ? results[0]
+    : { success: true, action: "scroll", message: "All actions rate limited or skipped" };
 
-  // 8. Save summary after each cycle
+  // 6. Save summary after each cycle
   try {
     const cycleSummary = summaryGen.generate(
       memory.postHistory,
@@ -440,5 +421,5 @@ export async function runCycle(deps: CycleDeps): Promise<CycleResult> {
     /* best effort save */
   }
 
-  return { result, cycleCount, lastSummary };
+  return { result: firstResult, cycleCount, lastSummary };
 }
