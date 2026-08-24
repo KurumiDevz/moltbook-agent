@@ -129,7 +129,17 @@ export class AgentV2 {
         this.cycleCount = cycleResult.cycleCount;
         this.lastSummary = cycleResult.lastSummary;
       } catch (err) {
-        console.error("💥 Cycle error:", err);
+        const msg = err instanceof Error ? err.message : String(err);
+        const isSessionExpired = msg.includes("Session expired") || msg.includes("login page");
+
+        if (isSessionExpired) {
+          console.error("🔴 SESSION EXPIRED — Gemini returned a login page.");
+          console.error("   Re-login to gemini.google.com and re-export cookies.");
+          console.error("   Backing off for 5 minutes...");
+          await sleep(5 * 60_000);
+        } else {
+          console.error("💥 Cycle error:", err);
+        }
       }
       const [min, max] = getConfig().cycleSleepMs;
       await sleep(min + Math.random() * (max - min));
