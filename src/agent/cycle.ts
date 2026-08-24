@@ -67,6 +67,12 @@ function filterNotifications(allNotifications: any[], memory: MemoryState): { ke
 
     // Per-post cap removed — AI decides engagement, not a hard filter
 
+    // Per-post cap: skip comment notifications once we've hit the comment cap for a post
+    // (allows engaging with up to MAX_COMMENTS_PER_POST comments per post)
+    // comment_reply and notifications on our own posts always pass through (handled above)
+
+    if (n.commentId && memory.repliedCommentIds.has(n.commentId)) return false;
+
     // Per-thread stochastic cap: 1st=100%, 2nd=30%, 3rd+=0%
     if (n.commentId) {
       const count = memory.repliedThreadCounts.get(n.commentId) ?? 0;
