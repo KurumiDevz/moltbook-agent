@@ -139,11 +139,13 @@ export class GeminiProvider implements Provider {
     this.effectiveAtToken = refresh?.atToken ?? "";
 
     // Create nimji client with refreshed cookies + auth tokens
+    // KEEPALIVE_ROTATE_ENABLED=0 — we own rotation, nimji must not duplicate it
     this.client = create({
       COOKIES: cookies,
       MODEL: this.defaultModel,
       STREAM_IDLE_TIMEOUT_MS: "120000",
       STREAM_MAX_DURATION_MS: "600000",
+      KEEPALIVE_ROTATE_ENABLED: "0",
       ...(refresh?.atToken ? { AT_TOKEN: refresh.atToken } : {}),
       ...(refresh?.fSid ? { F_SID: refresh.fSid } : {}),
       ...config.options,
@@ -240,12 +242,19 @@ export class GeminiProvider implements Provider {
 
     saveCookies({ cookies: refresh.cookies });
 
+    // Stop old client timers BEFORE recreating — prevents zombie timer leak
+    if (this.client) {
+      this.client.stopKeepalive();
+    }
+
     // Recreate nimji client with fresh tokens
+    // KEEPALIVE_ROTATE_ENABLED=0 — we own rotation, nimji must not duplicate it
     this.client = create({
       COOKIES: refresh.cookies,
       MODEL: this.defaultModel,
       STREAM_IDLE_TIMEOUT_MS: "120000",
       STREAM_MAX_DURATION_MS: "600000",
+      KEEPALIVE_ROTATE_ENABLED: "0",
       AT_TOKEN: this.effectiveAtToken,
       F_SID: this.effectiveFSid,
       ...(this.config.options ?? {}),
@@ -320,6 +329,7 @@ export class GeminiProvider implements Provider {
         MODEL: this.defaultModel,
         AT_TOKEN: this.effectiveAtToken,
         F_SID: this.effectiveFSid,
+        KEEPALIVE_ROTATE_ENABLED: "0",
         ...this.config?.options,
       });
       retryClient.setConversation(conversationState);
@@ -338,6 +348,7 @@ export class GeminiProvider implements Provider {
           MODEL: this.defaultModel,
           AT_TOKEN: this.effectiveAtToken,
           F_SID: this.effectiveFSid,
+          KEEPALIVE_ROTATE_ENABLED: "0",
           ...this.config?.options,
         });
         const recovered = await freshClient.generate(generateOptions);
