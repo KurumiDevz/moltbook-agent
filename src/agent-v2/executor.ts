@@ -12,6 +12,7 @@ import { resolve } from "node:path";
 import type { AgentDecision, ExecutionResult } from "../types.js";
 import type { MemoryState } from "./types.js";
 import { getRateLimits, isTopicRecent, parseTitleBody } from "./helpers.js";
+import { getConfig } from "../config.js";
 
 // ── Main dispatcher ────────────────────────────────────────────────
 
@@ -114,9 +115,9 @@ async function executePost(
     sourceId: posted.id,
     timestamp: Date.now(),
   });
-  // Keep only last 20 stances
-  if (memory.stances.length > 20) {
-    memory.stances = memory.stances.slice(-20);
+  // Keep only last N stances
+  if (memory.stances.length > getConfig().maxStances) {
+    memory.stances = memory.stances.slice(-getConfig().maxStances);
   }
 
   return { success: true, action: "post", message: `Posted: ${title}`, karmaDelta: 1 };
@@ -140,14 +141,14 @@ async function executeComment(
 
   // Hard guard: per-post comment cap (AI sometimes ignores this)
   const postCommentCount = memory.repliedPostCounts.get(decision.postId) ?? 0;
-  if (postCommentCount >= 2) {
+  if (postCommentCount >= getConfig().maxCommentsPerPost) {
     return { success: false, action: "comment", message: `Already commented ${postCommentCount}x on post ${decision.postId} — stopping` };
   }
 
   // Hard guard: minimum word count (AI sometimes generates one-liners)
   const wordCount = decision.content.split(/\s+/).length;
-  if (wordCount < 40) {
-    return { success: false, action: "comment", message: `Comment too short (${wordCount} words, min 40) — skipping` };
+  if (wordCount < getConfig().minCommentWords) {
+    return { success: false, action: "comment", message: `Comment too short (${wordCount} words, min ${getConfig().minCommentWords}) — skipping` };
   }
 
   await (await moltbookAgent.comment(decision.postId, decision.content)).unwrap();
@@ -169,8 +170,8 @@ async function executeComment(
     sourceId: decision.postId,
     timestamp: Date.now(),
   });
-  if (memory.stances.length > 20) {
-    memory.stances = memory.stances.slice(-20);
+  if (memory.stances.length > getConfig().maxStances) {
+    memory.stances = memory.stances.slice(-getConfig().maxStances);
   }
 
   // Mark notifications as read for the post we commented on (best effort)
@@ -206,14 +207,14 @@ async function executeReplyToComment(
 
   // Hard guard: per-post comment cap (AI sometimes ignores this)
   const postCommentCount = memory.repliedPostCounts.get(decision.postId) ?? 0;
-  if (postCommentCount >= 2) {
+  if (postCommentCount >= getConfig().maxCommentsPerPost) {
     return { success: false, action: "reply_to_comment", message: `Already commented ${postCommentCount}x on post ${decision.postId} — stopping` };
   }
 
   // Hard guard: minimum word count (AI sometimes generates one-liners)
   const replyWordCount = decision.content.split(/\s+/).length;
-  if (replyWordCount < 40) {
-    return { success: false, action: "reply_to_comment", message: `Reply too short (${replyWordCount} words, min 40) — skipping` };
+  if (replyWordCount < getConfig().minReplyWords) {
+    return { success: false, action: "reply_to_comment", message: `Reply too short (${replyWordCount} words, min ${getConfig().minReplyWords}) — skipping` };
   }
 
   // Pass commentId as parentId for threaded reply (only if it's a real comment, not hallucinated)
@@ -238,8 +239,8 @@ async function executeReplyToComment(
     sourceId: decision.commentId,
     timestamp: Date.now(),
   });
-  if (memory.stances.length > 20) {
-    memory.stances = memory.stances.slice(-20);
+  if (memory.stances.length > getConfig().maxStances) {
+    memory.stances = memory.stances.slice(-getConfig().maxStances);
   }
 
   // Track this comment ID so we never reply to it again

@@ -4,14 +4,16 @@
 
 import type { RateLimitState } from "../types.js";
 import type { MemoryState } from "./types.js";
+import { getConfig } from "../config.js";
 
 // ── Rate limiting ──────────────────────────────────────────────────
 
 /** Compute current rate limit state from memory timestamps. */
 export function getRateLimits(memory: MemoryState): RateLimitState {
+  const config = getConfig();
   const now = Date.now();
-  const postCooldown = 30 * 60 * 1000; // 30 min
-  const commentCooldown = 20 * 1000; // 20 sec
+  const postCooldown = config.commentCooldownMs;
+  const commentCooldown = config.replyCooldownMs;
   const timeSincePost = now - memory.lastPostAt;
   const timeSinceComment = now - memory.lastCommentAt;
 
@@ -30,7 +32,7 @@ export function getRateLimits(memory: MemoryState): RateLimitState {
 export function isTopicRecent(
   memory: MemoryState,
   topic: string,
-  windowMs = 24 * 60 * 60 * 1000,
+  windowMs = getConfig().topicDedupWindowMs,
 ): boolean {
   const now = Date.now();
   return memory.topicsSeen.some(
@@ -52,7 +54,7 @@ export function recordForeignStance(
   sourceId: string,
 ): void {
   // Don't record own stances
-  if (agentName === "nimjiagent-sz945r") return;
+  if (agentName === getConfig().agentName) return;
 
   // Don't duplicate — check if we already have this sourceId
   if (memory.foreignStances.some((s) => s.sourceId === sourceId)) return;
@@ -68,9 +70,9 @@ export function recordForeignStance(
     timestamp: Date.now(),
   });
 
-  // Keep only last 30 foreign stances
-  if (memory.foreignStances.length > 30) {
-    memory.foreignStances = memory.foreignStances.slice(-30);
+  // Keep only last N foreign stances
+  if (memory.foreignStances.length > getConfig().maxForeignStances) {
+    memory.foreignStances = memory.foreignStances.slice(-getConfig().maxForeignStances);
   }
 }
 

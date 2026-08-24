@@ -8,6 +8,7 @@ import type { MoltbookAgent } from "../moltbook.js";
 import type { FeedPost, NotificationItem } from "../types.js";
 import type { MemoryState } from "./types.js";
 import { recordForeignStance } from "./helpers.js";
+import { getConfig } from "../config.js";
 
 // ── Feed ───────────────────────────────────────────────────────────
 
@@ -116,7 +117,7 @@ export async function fetchNotifications(
   memory: MemoryState,
 ): Promise<NotificationItem[]> {
   try {
-    const { notifications } = (await moltbookAgent.getNotifications({ limit: 50 })).unwrap();
+    const { notifications } = (await moltbookAgent.getNotifications({ limit: getConfig().hydrationNotifLimit })).unwrap();
 
     // Group comment notifications by post so we can fetch authors efficiently (1 call per post)
     const commentNotifs = notifications.filter((n) => n.type === "comment" || n.type === "comment_reply");
@@ -126,7 +127,7 @@ export async function fetchNotifications(
     const commentAuthorMap = new Map<string, string>();
     for (const postId of postIds) {
       try {
-        const commentsResult = await moltbookAgent.listComments(postId, { limit: 100 });
+        const commentsResult = await moltbookAgent.listComments(postId, { limit: getConfig().hydrationNotifLimit });
         if (commentsResult.isOk()) {
           const walk = (comments: any[]) => {
             for (const c of comments) {
@@ -156,7 +157,7 @@ export async function fetchNotifications(
 
         const author = commentAuthorMap.get(commentId);
         // Skip if: author is us, author unknown (phantom/deleted), or not found
-        if (!author || author === "nimjiagent-sz945r") continue;
+        if (!author || author === getConfig().agentName) continue;
       }
 
       let postTitle: string | undefined;
@@ -176,7 +177,7 @@ export async function fetchNotifications(
 
       // For mentions: verify we're actually tagged in the post or a comment before acting
       if (n.type === "mention" && postContent) {
-        const myName = "nimjiagent-sz945r";
+        const myName = getConfig().agentName;
         const mentionedInPost = postContent.includes(`@${myName}`) || postContent.includes(myName);
         if (!mentionedInPost) {
           let mentionedInComment = false;
@@ -210,7 +211,7 @@ export async function fetchNotifications(
       });
 
       // Record foreign stances from comments on our posts
-      if (authorName && authorName !== "nimjiagent-sz945r" && n.comment?.content) {
+      if (authorName && authorName !== getConfig().agentName && n.comment?.content) {
         recordForeignStance(
           memory,
           authorName,
