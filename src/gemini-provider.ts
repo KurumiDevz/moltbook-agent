@@ -168,7 +168,7 @@ export class GeminiProvider implements Provider {
   private startKeepalive(): void {
     if (this.keepaliveTimer) return;
 
-    // Keepalive ping every 5 minutes (was 10 — too slow to catch expiry)
+    // Keepalive ping every 7 minutes
     this.keepaliveTimer = setInterval(async () => {
       if (!this.client) return;
       try {
@@ -182,9 +182,9 @@ export class GeminiProvider implements Provider {
         console.log("[gemini-provider] Keepalive failed — refreshing session...");
         await this.refreshSession();
       }
-    }, 5 * 60_000);
+    }, 7 * 60_000);
 
-    // Cookie + token rotation every 5 minutes (was 8 — too slow)
+    // Cookie + token rotation every 5 minutes
     this.refreshTimer = setInterval(async () => {
       await this.refreshSession();
     }, 5 * 60_000);
