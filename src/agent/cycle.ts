@@ -17,7 +17,7 @@ import { getRateLimits, recordForeignStance } from "./helpers.js";
 import { fetchFeed, fetchHome, fetchRelevantPosts, fetchNotifications } from "./context.js";
 import { execute as executeAction } from "./executor.js";
 import { getConfig, getBlocked } from "../config.js";
-import { getOwnTitles, getOwnTopics } from "./my-posts.js";
+import { saveMyPost } from "./my-posts.js";
 
 // ── Hard-blocked posts ─────────────────────────────────────────────
 
@@ -286,9 +286,15 @@ export async function runCycle(deps: CycleDeps): Promise<CycleResult> {
     summaryText = summaryGen.formatForPrompt(lastSummary);
   }
 
-  // Fetch own posts for topic pipeline semantic dedup (local tracker — API author param is broken)
-  const ownTitles = getOwnTitles();
-  const ownTopics = getOwnTopics();
+  // Fetch own posts via profile endpoint (the /posts?author= filter is broken)
+  const myPostsResult = await moltbookAgent.getMyPosts(getConfig().agentName);
+  const ownPosts = myPostsResult.ok ? myPostsResult.value : [];
+  const ownTitles = ownPosts.map((p) => p.title).filter(Boolean);
+
+  // Also save to local tracker for offline fallback
+  for (const p of ownPosts) {
+    saveMyPost({ postId: p.id, title: p.title, type: "post", submolt: p.submolt?.name ?? "" });
+  }
 
   // 4. AI decides
   console.log("🤔 AI deciding...");
@@ -297,7 +303,7 @@ export async function runCycle(deps: CycleDeps): Promise<CycleResult> {
     notifications,
     rateLimits,
     postHistory: memory.postHistory,
-    ownPosts: ownTitles.map((title, i) => ({ title, type: ownTopics[i] ?? "", submolt: "" })),
+    ownPosts: ownTitles.map((title, i) => ({ title, type: "post", submolt: ownPosts[i]?.submolt?.name ?? "" })),
     recentInteractions: [],
     summary: summaryText,
     stances: memory.stances,

@@ -667,6 +667,30 @@ Output only the post content, no meta-commentary.`;
     return this.request("GET", `/posts?${params}`);
   }
 
+  /** Get own posts via the agent profile endpoint (the /posts?author= filter is broken). */
+  async getMyPosts(agentName: string): Promise<
+    Result<
+      Array<{
+        id: string;
+        title: string;
+        content_preview: string;
+        upvotes: number;
+        downvotes: number;
+        comment_count: number;
+        created_at: string;
+        submolt: { name: string };
+      }>,
+      MoltbookApiError
+    >
+  > {
+    const result = await this.request("GET", `/agents/profile?name=${encodeURIComponent(agentName)}`);
+    if (!result.ok) return result as any;
+    const profile = result.value as Record<string, unknown>;
+    const agent = profile.agent as Record<string, unknown> | undefined;
+    const posts = (agent?.recentPosts ?? []) as any[];
+    return ok(posts);
+  }
+
   /** List comments for a post */
   async listComments(
     postId: string,
