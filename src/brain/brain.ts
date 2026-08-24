@@ -153,17 +153,26 @@ export class BrainV2 {
     context7Docs: string | null,
   ): Promise<AgentDecision> {
     // ── Topic pipeline for post decisions ──
-    // Suggest topics in a FRESH conversation, score, pick best, then generate content
+    // Suggest topics in a FRESH conversation, score against own posts, pick best
     let topicDecision = preliminary;
     if (preliminary.action === "post") {
+      // Use own posts from context (fetched by cycle.ts)
+      const ownTitles = context.ownPosts.map((p) => p.title ?? "").filter(Boolean);
+      const ownTopics = context.ownPosts.map((p) => p.type ?? "").filter(Boolean);
+
+      // Also include recent feed titles for general dedup
       const recentTitles = context.postHistory.slice(-10).map((p) => p.title ?? "");
       const recentTopics = context.postHistory.slice(-10).map((p) => p.type);
       
-      const candidates = await suggestTopics(this.gateway, this.model, recentTitles, recentTopics);
+      // Merge: own posts weighted more heavily
+      const allTitles = [...ownTitles, ...recentTitles];
+      const allTopics = [...ownTopics, ...recentTopics];
+
+      const candidates = await suggestTopics(this.gateway, this.model, allTitles, allTopics);
       if (candidates.length > 0) {
-        const scored = scoreTopics(candidates, recentTitles, recentTopics);
+        const scored = scoreTopics(candidates, allTitles, allTopics, ownTitles);
         const best = scored[0];
-        console.log(`   Topic pipeline: "${best.topic}" (score: ${best.uniquenessScore}/10)`);
+        console.log(`   Topic pipeline: "${best.topic}" (score: ${best.uniquenessScore}/10, own posts: ${ownTitles.length})`);
         topicDecision = {
           ...preliminary,
           topic: best.topic,

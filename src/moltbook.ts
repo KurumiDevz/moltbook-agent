@@ -642,6 +642,7 @@ Output only the post content, no meta-commentary.`;
   async listPosts(options?: {
     sort?: "hot" | "new" | "top" | "comments";
     submolt?: string;
+    author?: string;
     limit?: number;
     offset?: number;
     time?: "hour" | "day" | "week" | "month" | "all";
@@ -659,6 +660,7 @@ Output only the post content, no meta-commentary.`;
     const params = new URLSearchParams();
     if (options?.sort) params.set("sort", options.sort);
     if (options?.submolt) params.set("submolt", options.submolt);
+    if (options?.author) params.set("author", options.author);
     if (options?.limit) params.set("limit", String(options.limit));
     if (options?.offset) params.set("offset", String(options.offset));
     if (options?.time) params.set("time", options.time);

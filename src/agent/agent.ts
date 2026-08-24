@@ -192,6 +192,7 @@ export class AgentV2 {
       notifications,
       rateLimits,
       postHistory: this.memory.postHistory,
+      ownPosts: [],
       recentInteractions: [],
       summary: summaryText,
       stances: this.memory.stances,

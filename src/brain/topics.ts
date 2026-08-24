@@ -98,24 +98,58 @@ Respond with ONLY a JSON array:
 }
 
 /**
- * Score each candidate for uniqueness against recent posts.
- * Simple heuristic: penalize topics that overlap with recent titles/topics.
+ * Score each candidate for uniqueness against recent posts and own post history.
+ * - Word overlap with recent posts: penalize
+ * - Word overlap with own posts: penalize harder (3x weight)
+ * - Bonus for covering a submolt we haven't posted in recently
  */
 export function scoreTopics(
   candidates: TopicCandidate[],
   recentTitles: string[],
   recentTopics: string[],
+  ownTitles: string[] = [],
 ): TopicCandidate[] {
   const recentText = [...recentTitles, ...recentTopics].join(" ").toLowerCase();
   const recentWords = new Set(recentText.split(/\s+/).filter((w) => w.length > 3));
 
+  // Build own-post word set with higher weight
+  const ownText = ownTitles.join(" ").toLowerCase();
+  const ownWords = new Set(ownText.split(/\s+/).filter((w) => w.length > 3));
+
+  // Extract submolts from own titles to detect submolt diversity
+  const ownSubmolts = new Set(
+    ownTitles.map((t) => {
+      const lower = t.toLowerCase();
+      if (lower.includes("v8") || lower.includes("heap") || lower.includes("worker")) return "builds";
+      if (lower.includes("security") || lower.includes("sandbox") || lower.includes("auth")) return "security";
+      if (lower.includes("memory") || lower.includes("context")) return "memory";
+      if (lower.includes("agent") || lower.includes("skill")) return "agents";
+      return "general";
+    }) as string[],
+  );
+
   return candidates
     .map((c) => {
       const topicWords = c.topic.toLowerCase().split(/\s+/);
-      const overlap = topicWords.filter((w) => recentWords.has(w)).length;
-      const uniqueWords = topicWords.length - overlap;
-      // Score: higher = more unique (0-10)
-      const score = Math.min(10, Math.max(1, uniqueWords * 2 + (overlap === 0 ? 3 : 0)));
+
+      // Word overlap with general feed (1x penalty)
+      const feedOverlap = topicWords.filter((w) => recentWords.has(w)).length;
+
+      // Word overlap with own posts (3x penalty — we REALLY don't want to repeat ourselves)
+      const ownOverlap = topicWords.filter((w) => ownWords.has(w)).length;
+
+      const totalOverlap = feedOverlap + ownOverlap * 3;
+      const uniqueWords = topicWords.length - feedOverlap - ownOverlap;
+
+      // Base score from uniqueness
+      let score = Math.min(10, Math.max(1, uniqueWords * 2 + (totalOverlap === 0 ? 3 : 0)));
+
+      // Bonus for posting in a submolt we haven't covered recently
+      if (!ownSubmolts.has(c.submolt)) score = Math.min(10, score + 2);
+
+      // Penalty for heavy overlap with own posts
+      if (ownOverlap >= 3) score = Math.max(1, score - 4);
+
       return { ...c, uniquenessScore: score };
     })
     .sort((a, b) => b.uniquenessScore - a.uniquenessScore);

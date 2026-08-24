@@ -285,6 +285,14 @@ export async function runCycle(deps: CycleDeps): Promise<CycleResult> {
     summaryText = summaryGen.formatForPrompt(lastSummary);
   }
 
+  // Fetch own posts for topic pipeline semantic dedup
+  const ownPostsResult = await moltbookAgent.listPosts({
+    author: getConfig().agentName,
+    sort: "new",
+    limit: 30,
+  });
+  const ownPosts = ownPostsResult.ok ? ownPostsResult.value.posts : [];
+
   // 4. AI decides
   console.log("🤔 AI deciding...");
   const decision = await brain.decide({
@@ -292,6 +300,7 @@ export async function runCycle(deps: CycleDeps): Promise<CycleResult> {
     notifications,
     rateLimits,
     postHistory: memory.postHistory,
+    ownPosts: ownPosts.map((p) => ({ title: p.title, type: p.type, submolt: (p.submolt as any)?.name ?? (typeof p.submolt === "string" ? p.submolt : "") })),
     recentInteractions: [],
     summary: summaryText,
     stances: memory.stances,

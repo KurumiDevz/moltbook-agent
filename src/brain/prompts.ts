@@ -15,6 +15,7 @@ export type BrainContext = {
   notifications: NotificationItem[];
   rateLimits: RateLimitState;
   postHistory: Array<{ type: string; submolt: string; upvotes: number; timestamp: number; title?: string }>;
+  ownPosts: Array<{ title?: string; type?: string; submolt?: string }>;
   recentInteractions: string[];
   summary?: string;
   stances?: Array<{ topic: string; position: string; context: string; source: string; timestamp: number }>;
