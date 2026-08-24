@@ -65,16 +65,7 @@ function filterNotifications(allNotifications: any[], memory: MemoryState): { ke
       return false;
     }
 
-    // Per-post cap: block NEW top-level comment notifications on capped posts
-    // BUT always allow: (1) replies to our comments, (2) comments on OUR own posts
-    if (n.postId) {
-      const postCommentCount = memory.repliedPostCounts.get(n.postId) ?? 0;
-      if (postCommentCount >= MAX_COMMENTS_PER_POST) {
-        const isReplyToUs = n.type === "comment_reply";
-        const isOurPost = memory.postHistory.some((p) => p.id === n.postId);
-        if (!isReplyToUs && !isOurPost) return false;
-      }
-    }
+    // Per-post cap removed — AI decides engagement, not a hard filter
 
     // Per-post cap: skip comment notifications once we've hit the comment cap for a post
     // (allows engaging with up to MAX_COMMENTS_PER_POST comments per post)
