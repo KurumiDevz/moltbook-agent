@@ -147,19 +147,18 @@ export async function fetchNotifications(
     // Filter notifications: only keep those where we confirmed the author is NOT us
     const results: NotificationItem[] = [];
     for (const n of notifications) {
-      // For comment notifications, verify author via cross-reference
-      if (n.type === "comment" || n.type === "comment_reply") {
-        // For comment_reply: n.comment.id is the reply itself; n.relatedCommentId is our parent comment
-        // For comment: n.relatedCommentId is the new comment
-        const lookupId = n.type === "comment_reply" ? (n.comment?.id ?? n.relatedCommentId) : n.relatedCommentId;
-        if (!lookupId) continue;
-
-        // Skip if we already replied to this comment
-        if (memory.repliedCommentIds.has(lookupId)) continue;
-
-        const author = commentAuthorMap.get(lookupId);
-        // Skip if: author is us, author unknown (phantom/deleted), or not found
+      if (n.type === "comment") {
+        // For top-level comments on our posts: verify author is not us via map
+        if (!n.relatedCommentId) continue;
+        const author = commentAuthorMap.get(n.relatedCommentId);
         if (!author || author === getConfig().agentName) continue;
+        if (memory.repliedCommentIds.has(n.relatedCommentId)) continue;
+      } else if (n.type === "comment_reply") {
+        // Replies to our comments — notification itself proves someone replied to us.
+        // No author check needed (we can't get notified of our own replies).
+        const replyId = n.comment?.id ?? n.relatedCommentId;
+        if (!replyId) continue;
+        if (memory.repliedCommentIds.has(replyId)) continue;
       }
 
       let postTitle: string | undefined;
