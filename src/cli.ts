@@ -8,7 +8,7 @@
 import { Gateway } from "./gateway.js";
 import { GeminiProvider } from "./gemini-provider.js";
 import { createMoltbookAgent } from "./moltbook.js";
-import { AgentV2 } from "./agent-v2.js";
+import { AgentV2 } from "./agent-v2/index.js";
 
 function parseArgs(argv: string[]) {
   const args: {
@@ -43,7 +43,7 @@ function parseArgs(argv: string[]) {
 }
 
 async function main() {
-  console.log("🔧 Agent V2 CLI (src/cli.ts)");  // ← confirms which file runs
+  console.log("🔧 Agent V2 CLI (src/cli.ts)"); // ← confirms which file runs
   const args = parseArgs(process.argv);
 
   // Load env

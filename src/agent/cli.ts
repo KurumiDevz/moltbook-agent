@@ -3,8 +3,7 @@
 import { Gateway } from "../gateway.js";
 import { GeminiProvider } from "../gemini-provider.js";
 import { createMoltbookAgent } from "../moltbook.js";
-import { createBrain } from "../brain/index.js";
-import { AutonomousAgent } from "./agent.js";
+import { AgentV2 } from "../agent-v2/index.js";
 
 function parseArgs(argv: string[]) {
   const args: {
@@ -55,43 +54,38 @@ async function main() {
   gateway.registerProvider(gemini);
   await gateway.initializeProvider("gemini", { type: "gemini", options: { cookies } });
 
-  // Create Moltbook agent + Brain with Moltbook-native persona
+  // Create Moltbook agent
   const moltbookAgent = createMoltbookAgent(gateway, { apiKey });
-  const brain = createBrain({
-    gateway,
-    persona: {
-      name: "nimjiagent",
-      voice: "first person, direct, insider agent talk. Use terms like context window, token budget, prompt injection, tool calls, execution sandbox. Never sound like a human blog post.",
-      expertise: ["AI agents", "LLM orchestration", "prompt engineering", "tool chains", "agent security", "context management"],
-      style: "bold assertions, specific tools and numbers, distinctive voice. Challenge assumptions. Be wrong on record if needed. Never hedge with 'I think' or 'maybe'.",
-      avoid: ["synergy", "leverage", "game-changer", "delve", "it depends", "I think", "maybe", "could possibly", "in today's world", "landscape", "ecosystem"],
-    },
-  });
 
-  // Create AutonomousAgent
-  const agent = new AutonomousAgent({
+  // Create AgentV2 (prompt-driven, uses skills/ directory)
+  const agent = new AgentV2({
     moltbookAgent,
-    brain,
+    gateway,
     submolts: args.submolts,
+    skillsDir: "skills",
+    summaryInterval: 5,
   });
 
   // --status: show and exit
   if (args.status) {
-    const s = agent.getStatus();
-    console.log(JSON.stringify(s, null, 2));
+    console.log("Agent V2 (prompt-driven mode)");
+    console.log(`  Submolts: ${args.submolts.join(", ")}`);
+    console.log(`  Skills dir: skills/`);
+    console.log(`  Summary interval: every 5 cycles`);
     return;
   }
 
   // --dry-run: observe + decide but don't execute
   if (args.dryRun) {
-    console.log("🧪 Dry run — observe + decide only");
-    await agent.dryRun();
+    const decision = await agent.dryRun();
+    console.log(`\n📋 Would execute: ${decision.action}`);
+    console.log(`   Reason: ${decision.reason}`);
     return;
   }
 
   // Handle shutdown gracefully
-  process.on("SIGINT", async () => {
-    await agent.stop();
+  process.on("SIGINT", () => {
+    agent.stop();
     process.exit(0);
   });
 
@@ -101,7 +95,7 @@ async function main() {
     for (let i = 0; i < args.cycles; i++) {
       await agent.cycle();
     }
-    await agent.stop();
+    agent.stop();
     return;
   }
 

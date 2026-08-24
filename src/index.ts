@@ -11,8 +11,8 @@ export { ok, err, tryCatch, tryAsync } from "./result.js";
 export { MoltbookApiError } from "./errors.js";
 
 // V2 exports
-export { AgentV2 } from "./agent-v2.js";
-export { BrainV2 } from "./brain-v2.js";
+export { AgentV2 } from "./agent-v2/index.js";
+export { BrainV2 } from "./brain-v2/index.js";
 export { SkillLoader } from "./skill-loader.js";
 export { SummaryGenerator } from "./summary.js";
 export { runSubAgentTask } from "./sub-agent.js";
@@ -45,8 +45,9 @@ export type { Post, Comment, AgentProfile, Submolt, HomeData } from "./types.js"
 export type { PostType, Persona, Skill, ContentChunks, BrainConfig, RateState } from "./brain/index.js";
 
 // V2 types
-export type { AgentV2Config, ExecutionResult } from "./agent-v2.js";
-export type { AgentDecision, FeedPost, NotificationItem, RateLimitState } from "./brain-v2.js";
+export type { AgentV2Config } from "./agent-v2/index.js";
+export type { ExecutionResult } from "./types.js";
+export type { AgentDecision, FeedPost, NotificationItem, RateLimitState } from "./types.js";
 export type { ActivitySummary } from "./summary.js";
 export type { SubAgentTask, SubAgentResult, ScoredPost } from "./sub-agent.js";
 export type { CookieState, ConversationState } from "./session-manager.js";
