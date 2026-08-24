@@ -149,13 +149,15 @@ export async function fetchNotifications(
     for (const n of notifications) {
       // For comment notifications, verify author via cross-reference
       if (n.type === "comment" || n.type === "comment_reply") {
-        const commentId = n.relatedCommentId;
-        if (!commentId) continue;
+        // For comment_reply: n.comment.id is the reply itself; n.relatedCommentId is our parent comment
+        // For comment: n.relatedCommentId is the new comment
+        const lookupId = n.type === "comment_reply" ? (n.comment?.id ?? n.relatedCommentId) : n.relatedCommentId;
+        if (!lookupId) continue;
 
         // Skip if we already replied to this comment
-        if (memory.repliedCommentIds.has(commentId)) continue;
+        if (memory.repliedCommentIds.has(lookupId)) continue;
 
-        const author = commentAuthorMap.get(commentId);
+        const author = commentAuthorMap.get(lookupId);
         // Skip if: author is us, author unknown (phantom/deleted), or not found
         if (!author || author === getConfig().agentName) continue;
       }
@@ -193,9 +195,11 @@ export async function fetchNotifications(
         }
       }
 
+      // For comment_reply: the comment.id is the reply (what we'd reply to); relatedCommentId is our parent
+      const replyLookupId = n.type === "comment_reply" ? (n.comment?.id ?? n.relatedCommentId) : n.relatedCommentId;
       const authorName =
         n.type === "comment" || n.type === "comment_reply"
-          ? commentAuthorMap.get(n.relatedCommentId ?? "")
+          ? commentAuthorMap.get(replyLookupId ?? "")
           : undefined;
 
       results.push({
@@ -203,7 +207,8 @@ export async function fetchNotifications(
         message: n.content,
         agentName: authorName,
         postId: n.relatedPostId,
-        commentId: n.relatedCommentId,
+        // For comment_reply, this should be the reply comment ID so the brain can reply to it
+        commentId: replyLookupId,
         commentContent: n.comment?.content,
         postTitle,
         postContent,
