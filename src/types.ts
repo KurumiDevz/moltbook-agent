@@ -294,6 +294,8 @@ export type ActivitySummary = {
   repliedCommentIds: string[];
   /** Per-thread reply counts — keyed by parent comment ID (thread root), survives restarts */
   repliedThreadCounts: Record<string, number>;
+  /** Per-post comment counts — keyed by post ID, caps top-level comments per post */
+  repliedPostCounts: Record<string, number>;
   /** Post IDs we've created — hydration uses these instead of scanning feed */
   postHistory: PostSummary[];
   /** Stances the agent has taken — positions it can reference in debates */

@@ -68,6 +68,8 @@ type MemoryState = {
   repliedCommentIds: Set<string>;
   /** Per-thread reply count — keyed by parent comment ID (thread root) */
   repliedThreadCounts: Map<string, number>;
+  /** Per-post comment count — keyed by post ID, caps top-level comments per post */
+  repliedPostCounts: Map<string, number>;
   /** Stances the agent has taken — positions it can reference in debates */
   stances: Stance[];
   /** Stances other agents have taken — positions nimjiagent can reference in debates */
@@ -122,6 +124,11 @@ export class AgentV2 {
       repliedThreadCounts: new Map<string, number>(
         existingSummary?.repliedThreadCounts
           ? Object.entries(existingSummary.repliedThreadCounts)
+          : [],
+      ),
+      repliedPostCounts: new Map<string, number>(
+        existingSummary?.repliedPostCounts
+          ? Object.entries(existingSummary.repliedPostCounts)
           : [],
       ),
       postHistory: (existingSummary?.postHistory ?? []).map((p: any) => ({
@@ -319,8 +326,10 @@ export class AgentV2 {
     this.memory.foreignStances = this.memory.foreignStances.filter((s) => !blockedPostIds.has(s.context));
 
     // Filter out: already-replied, self-notifications, and stochastic per-thread cap
+    const MAX_COMMENTS_PER_POST = 2;
     const notifications = allNotifications.filter((n) => {
       if (n.postId && blockedPostIds.has(n.postId)) return false; // blocked post
+      if (n.postId && (this.memory.repliedPostCounts.get(n.postId) ?? 0) >= MAX_COMMENTS_PER_POST) return false; // already commented enough on this post
       if (n.commentId && this.memory.repliedCommentIds.has(n.commentId)) {
         return false; // already replied
       }
@@ -519,6 +528,7 @@ export class AgentV2 {
         this.memory.stances,
         this.memory.foreignStances,
         Object.fromEntries(this.memory.repliedThreadCounts),
+        Object.fromEntries(this.memory.repliedPostCounts),
         [...this.memory.repliedCommentIds],
         this.memory.postHistory,
       );
@@ -561,6 +571,7 @@ export class AgentV2 {
         this.memory.stances,
         this.memory.foreignStances,
         Object.fromEntries(this.memory.repliedThreadCounts),
+        Object.fromEntries(this.memory.repliedPostCounts),
         [...this.memory.repliedCommentIds],
         this.memory.postHistory,
       );
@@ -717,11 +728,21 @@ export class AgentV2 {
       return { success: false, action: "comment", message: "No comment content provided" };
     }
 
+    // Hard guard: per-post comment cap (AI sometimes ignores this)
+    const postCommentCount = this.memory.repliedPostCounts.get(decision.postId) ?? 0;
+    if (postCommentCount >= 2) {
+      return { success: false, action: "comment", message: `Already commented ${postCommentCount}x on post ${decision.postId} — stopping` };
+    }
+
     await (await this.moltbookAgent.comment(decision.postId, decision.content)).unwrap();
 
     this.memory.totalComments++;
     this.memory.commentsToday++;
     this.memory.lastCommentAt = Date.now();
+
+    // Track per-post comment count (caps top-level comments per post)
+    const postCount = this.memory.repliedPostCounts.get(decision.postId) ?? 0;
+    this.memory.repliedPostCounts.set(decision.postId, postCount + 1);
 
     // Record stance — what position did this comment take?
     this.memory.stances.push({
@@ -760,6 +781,12 @@ export class AgentV2 {
     // Validate commentId exists before replying — AI sometimes hallucinates IDs from mention notifications
     if (decision.commentId && this.memory.repliedCommentIds.has(decision.commentId)) {
       return { success: false, action: "reply_to_comment", message: "Already replied to this comment" };
+    }
+
+    // Hard guard: per-post comment cap (AI sometimes ignores this)
+    const postCommentCount = this.memory.repliedPostCounts.get(decision.postId) ?? 0;
+    if (postCommentCount >= 2) {
+      return { success: false, action: "reply_to_comment", message: `Already commented ${postCommentCount}x on post ${decision.postId} — stopping` };
     }
 
     // Pass commentId as parentId for threaded reply (only if it's a real comment, not hallucinated)

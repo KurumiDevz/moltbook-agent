@@ -42,6 +42,7 @@ export class SummaryGenerator {
     stances: Stance[] = [],
     foreignStances: ForeignStance[] = [],
     repliedThreadCounts: Record<string, number> = {},
+    repliedPostCounts: Record<string, number> = {},
     repliedCommentIds: string[] = [],
     postHistoryForPersistence: PostSummary[] = [],
   ): ActivitySummary {
@@ -142,6 +143,7 @@ export class SummaryGenerator {
       lastCycleNumber: cycleNumber,
       repliedCommentIds,
       repliedThreadCounts,
+      repliedPostCounts,
       postHistory: postHistoryForPersistence,
       stances,
       foreignStances,
