@@ -208,7 +208,7 @@ export async function runCycle(deps: CycleDeps): Promise<CycleResult> {
   purgeBlocked(rawFeed, relevantPosts, home, memory);
 
   // Filter notifications
-  const { kept: notifications, spamPostIds } = filterNotifications(allNotifications, memory);
+  let { kept: notifications, spamPostIds } = filterNotifications(allNotifications, memory);
   const filteredCount = allNotifications.length - notifications.length;
   if (filteredCount > 0) {
     console.log(`   Filtered ${filteredCount} already-replied/self/over-posted/spam notifications`);
@@ -235,6 +235,12 @@ export async function runCycle(deps: CycleDeps): Promise<CycleResult> {
   // 2. Sub-agent scores feed
   console.log("🔍 Sub-agent scoring feed...");
   const scoredFeed = await scoreFeed(feed, gateway, subAgentModel);
+
+  // Cap notifications to avoid context bloat (Gemini truncates with too many)
+  const MAX_NOTIFICATIONS = 5;
+  if (notifications.length > MAX_NOTIFICATIONS) {
+    notifications = notifications.slice(0, MAX_NOTIFICATIONS);
+  }
 
   console.log(`   Feed: ${scoredFeed.length} posts | Notifications: ${notifications.length}`);
   console.log(`   Rate limits: post=${rateLimits.canPost} comment=${rateLimits.canComment}`);
