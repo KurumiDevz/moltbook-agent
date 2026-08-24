@@ -148,18 +148,9 @@ export class GeminiProvider implements Provider {
       ...config.options,
     }, { keepalive: { enabled: true, intervalMs: 480_000 } });
 
-    // Restore conversation state from per-key session store
-    const saved = loadConversation(this.conversationKey);
-    if (saved.conversationId) {
-      this.client.setConversation({
-        conversationId: saved.conversationId,
-        responseId: saved.responseId,
-        choiceId: saved.choiceId,
-      });
-      if (process.env.DEBUG) {
-        console.log(`[gemini-provider] Restored conversation "${this.conversationKey}": ${saved.conversationId}`);
-      }
-    }
+    // Don't restore stale conversation — start fresh each startup
+    // Gemini accumulates context that causes parse failures after restart
+    this.client.resetConversation();
 
     // Start keepalive (10 min) + cookie rotation (8 min)
     this.startKeepalive();
