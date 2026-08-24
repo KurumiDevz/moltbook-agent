@@ -15,6 +15,7 @@ import type { MemoryState } from "./types.js";
 import { getRateLimits, isTopicRecent, parseTitleBody } from "./helpers.js";
 import { getConfig } from "../config.js";
 import { deleteConversation } from "../session-manager.js";
+import { saveMyPost } from "./my-posts.js";
 
 // ── Content expansion helper ───────────────────────────────────────
 
@@ -167,6 +168,9 @@ async function executePost(
     timestamp: Date.now(),
   });
   memory.topicsSeen.push({ topic: decision.topic, timestamp: Date.now() });
+
+  // Track in local file for topic pipeline dedup
+  saveMyPost({ postId: posted.id, title, type: decision.postType, submolt: decision.submolt });
   memory.totalPosts++;
   memory.lastPostAt = Date.now();
 
