@@ -76,12 +76,9 @@ function filterNotifications(allNotifications: any[], memory: MemoryState): { ke
       }
     }
 
-    // Hard filter: skip comment notifications on posts we already replied to
-    // (prevents duplicate replies when markNotificationsRead fails)
-    if (n.type === "comment" && n.postId) {
-      const postCommentCount = memory.repliedPostCounts.get(n.postId) ?? 0;
-      if (postCommentCount > 0) return false;
-    }
+    // Per-post cap: skip comment notifications once we've hit the comment cap for a post
+    // (allows engaging with up to MAX_COMMENTS_PER_POST comments per post)
+    // comment_reply and notifications on our own posts always pass through (handled above)
 
     if (n.commentId && memory.repliedCommentIds.has(n.commentId)) return false;
 

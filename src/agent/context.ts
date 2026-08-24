@@ -194,12 +194,15 @@ export async function fetchNotifications(
         }
       }
 
-      // For comment_reply: the comment.id is the reply (what we'd reply to); relatedCommentId is our parent
+      // For comment_reply: n.comment?.id is the reply, n.relatedCommentId is our parent
+      // Use n.comment.author.name directly if available (API provides it), else try map
       const replyLookupId = n.type === "comment_reply" ? (n.comment?.id ?? n.relatedCommentId) : n.relatedCommentId;
       const authorName =
-        n.type === "comment" || n.type === "comment_reply"
-          ? commentAuthorMap.get(replyLookupId ?? "")
-          : undefined;
+        n.type === "comment_reply"
+          ? (n.comment?.author?.name ?? commentAuthorMap.get(n.comment?.id ?? "") ?? undefined)
+          : n.type === "comment"
+            ? commentAuthorMap.get(n.relatedCommentId ?? "")
+            : undefined;
 
       results.push({
         type: n.type,
