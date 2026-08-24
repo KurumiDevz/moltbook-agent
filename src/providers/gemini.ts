@@ -144,7 +144,8 @@ export class GeminiProvider implements Provider {
       MODEL: this.defaultModel,
       STREAM_IDLE_TIMEOUT_MS: "120000",
       STREAM_MAX_DURATION_MS: "600000",
-      ...(refresh ? { AT_TOKEN: refresh.atToken, F_SID: refresh.fSid } : {}),
+      ...(refresh?.atToken ? { AT_TOKEN: refresh.atToken } : {}),
+      ...(refresh?.fSid ? { F_SID: refresh.fSid } : {}),
       ...config.options,
     }, { keepalive: { enabled: true, intervalMs: 480_000 } });
 
@@ -203,10 +204,10 @@ export class GeminiProvider implements Provider {
       return;
     }
 
-    // Update all auth state
+    // Update auth state — preserve last-known-good atToken/fSid if refresh returned null
     this.effectiveCookies = refresh.cookies;
-    this.effectiveFSid = refresh.fSid;
-    this.effectiveAtToken = refresh.atToken;
+    this.effectiveFSid = refresh.fSid || this.effectiveFSid;
+    this.effectiveAtToken = refresh.atToken || this.effectiveAtToken;
     saveCookies({ cookies: refresh.cookies });
 
     // Recreate nimji client with fresh tokens
@@ -215,8 +216,8 @@ export class GeminiProvider implements Provider {
       MODEL: this.defaultModel,
       STREAM_IDLE_TIMEOUT_MS: "120000",
       STREAM_MAX_DURATION_MS: "600000",
-      AT_TOKEN: refresh.atToken,
-      F_SID: refresh.fSid,
+      AT_TOKEN: this.effectiveAtToken,
+      F_SID: this.effectiveFSid,
       ...(this.config.options ?? {}),
     }, { keepalive: { enabled: true, intervalMs: 480_000 } });
 
