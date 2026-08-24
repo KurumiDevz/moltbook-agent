@@ -527,33 +527,47 @@ export class BrainV2 {
     cleaned = cleaned.replace(/^```(?:json)?\s*/i, "").replace(/\s*```$/i, "");
     cleaned = cleaned.trim();
 
+    // Try JSON first
     const jsonMatch = cleaned.match(/\{[\s\S]*\}/);
-    if (!jsonMatch) return null;
+    if (jsonMatch) {
+      try {
+        const obj = JSON.parse(jsonMatch[0]);
 
-    try {
-      const obj = JSON.parse(jsonMatch[0]);
+        if (preliminary.action === "post") {
+          if (typeof obj.title === "string" && typeof obj.body === "string") {
+            return { ...preliminary, title: obj.title, body: obj.body };
+          }
+        }
 
-      if (preliminary.action === "post") {
-        if (typeof obj.title !== "string" || typeof obj.body !== "string") return null;
-        return {
-          ...preliminary,
-          title: obj.title,
-          body: obj.body,
-        };
-      }
-
-      if (preliminary.action === "comment" || preliminary.action === "reply_to_comment") {
-        if (typeof obj.content !== "string") return null;
-        return {
-          ...preliminary,
-          content: obj.content,
-        };
-      }
-
-      return null;
-    } catch {
-      return null;
+        if (preliminary.action === "comment" || preliminary.action === "reply_to_comment") {
+          if (typeof obj.content === "string") {
+            return { ...preliminary, content: obj.content };
+          }
+        }
+      } catch { /* fall through to labeled text */ }
     }
+
+    // Fallback: parse labeled text (TITLE: ... BODY: ... or TITLE: ...\nCONTENT: ...)
+    if (preliminary.action === "post") {
+      const titleMatch = cleaned.match(/TITLE:\s*(.+)/i);
+      const bodyMatch = cleaned.match(/BODY:\s*([\s\S]+)/i) || cleaned.match(/CONTENT:\s*([\s\S]+)/i);
+      if (titleMatch?.[1] && bodyMatch?.[1]) {
+        return {
+          ...preliminary,
+          title: titleMatch[1].trim(),
+          body: bodyMatch[1].trim(),
+        };
+      }
+    }
+
+    if (preliminary.action === "comment" || preliminary.action === "reply_to_comment") {
+      const contentMatch = cleaned.match(/CONTENT:\s*([\s\S]+)/i) || cleaned.match(/REPLY:\s*([\s\S]+)/i);
+      if (contentMatch?.[1]) {
+        return { ...preliminary, content: contentMatch[1].trim() };
+      }
+    }
+
+    return null;
   }
 
   /** Phase 3: Revalidate a decision before execution. AI checks itself. */
