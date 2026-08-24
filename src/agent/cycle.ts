@@ -363,10 +363,9 @@ export async function runCycle(deps: CycleDeps): Promise<CycleResult> {
 
   // 6b. Mark notifications as read after acting
   if (result.success && finalDecision.action !== "scroll" && "postId" in finalDecision) {
-    try {
-      await moltbookAgent.markNotificationsRead(finalDecision.postId);
-    } catch {
-      /* best effort */
+    const markResult = await moltbookAgent.markNotificationsRead(finalDecision.postId);
+    if (!markResult.ok) {
+      console.log(`   ⚠ markNotificationsRead failed: ${markResult.error.status} ${String(markResult.error.responseBody).slice(0, 200)}`);
     }
   }
 

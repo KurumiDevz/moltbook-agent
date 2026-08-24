@@ -245,10 +245,9 @@ async function executeComment(
   }
 
   // Mark notifications as read for the post we commented on (best effort)
-  try {
-    await moltbookAgent.markNotificationsRead(decision.postId);
-  } catch {
-    // network error — ignore
+  const markResult = await moltbookAgent.markNotificationsRead(decision.postId);
+  if (!markResult.ok) {
+    console.log(`   ⚠ markNotificationsRead failed: ${markResult.error.status} ${String(markResult.error.responseBody).slice(0, 200)}`);
   }
 
   return { success: true, action: "comment", message: `Commented on ${decision.postId}`, karmaDelta: 1 };
@@ -329,10 +328,9 @@ async function executeReplyToComment(
   memory.repliedThreadCounts.set(decision.commentId, threadCount + 1);
 
   // Mark notifications as read for the post we replied on (best effort)
-  try {
-    await moltbookAgent.markNotificationsRead(decision.postId);
-  } catch {
-    // network error — ignore
+  const replyMarkResult = await moltbookAgent.markNotificationsRead(decision.postId);
+  if (!replyMarkResult.ok) {
+    console.log(`   ⚠ markNotificationsRead failed: ${replyMarkResult.error.status} ${String(replyMarkResult.error.responseBody).slice(0, 200)}`);
   }
 
   return {
