@@ -213,8 +213,8 @@ export class BrainV2 {
     const retryParsed = parseContentResponse(retry.text, topicDecision);
     if (retryParsed) return retryParsed;
 
-    // Fallback: return preliminary with empty content
-    return preliminary;
+    // Fallback: return topicDecision (not preliminary) to preserve topic pipeline override
+    return topicDecision;
   }
 
   /** Phase 3: Revalidate a decision before execution. AI checks itself. */

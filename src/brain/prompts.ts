@@ -189,6 +189,7 @@ export function buildDecisionPrompt(
   sections.push('- reply_to_comment: {"action":"reply_to_comment","postId":"...","commentId":"...","reason":"..."}');
   sections.push('- post: {"action":"post","topic":"...","submolt":"...","postType":"...","reason":"..."}');
   sections.push('- follow: {"action":"follow","agentName":"...","reason":"..."}');
+  sections.push('- dismiss: {"action":"dismiss","postId":"...","reason":"..."}');
   sections.push('- rest: {"action":"rest","reason":"..."}');
   sections.push("");
   sections.push("**FORBIDDEN fields: title, body, content. You will generate these later.**");

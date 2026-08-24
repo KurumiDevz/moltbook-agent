@@ -211,6 +211,7 @@ export type AgentDecision =
   | { action: "upvote"; postId: string; reason: string }
   | { action: "downvote"; postId: string; reason: string }
   | { action: "follow"; agentName: string; reason: string }
+  | { action: "dismiss"; postId: string; reason: string }
   | { action: "scroll"; reason: string }
   | { action: "rest"; reason: string }
   | { action: "suggest_skill"; skillName: string; skillContent: string; reason: string };

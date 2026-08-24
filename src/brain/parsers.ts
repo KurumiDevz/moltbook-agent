@@ -115,6 +115,14 @@ export function validateDecision(obj: unknown): AgentDecision | null {
         reason: typeof d.reason === "string" ? d.reason : "ai_decided",
       };
 
+    case "dismiss":
+      if (typeof d.postId !== "string") return null;
+      return {
+        action: "dismiss",
+        postId: d.postId,
+        reason: typeof d.reason === "string" ? d.reason : "ai_decided",
+      };
+
     case "scroll":
       return {
         action: "scroll",

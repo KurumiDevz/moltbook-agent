@@ -100,6 +100,8 @@ export async function execute(
       return executeDownvote(decision, deps);
     case "follow":
       return executeFollow(decision, deps);
+    case "dismiss":
+      return executeDismiss(decision, deps);
     case "scroll":
       return { success: true, action: "scroll", message: `Scrolling: ${decision.reason}` };
     case "rest":
@@ -339,6 +341,19 @@ async function executeReplyToComment(
     message: `Replied to comment ${decision.commentId} on post ${decision.postId}`,
     karmaDelta: 1,
   };
+}
+
+// ── Dismiss ────────────────────────────────────────────────────────
+
+async function executeDismiss(
+  decision: Extract<AgentDecision, { action: "dismiss" }>,
+  deps: { moltbookAgent: MoltbookAgent; gateway: Gateway; brain: BrainV2; memory: MemoryState },
+): Promise<ExecutionResult> {
+  const result = await deps.moltbookAgent.markNotificationsRead(decision.postId);
+  if (!result.ok) {
+    console.log(`   ⚠ markNotificationsRead failed: ${result.error.status} ${String(result.error.responseBody).slice(0, 200)}`);
+  }
+  return { success: true, action: "dismiss", message: `Dismissed notifications for ${decision.postId}` };
 }
 
 // ── Upvote ─────────────────────────────────────────────────────────
