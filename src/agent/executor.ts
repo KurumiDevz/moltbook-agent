@@ -280,12 +280,6 @@ async function executeReplyToComment(
     return { success: false, action: "reply_to_comment", message: "Already replied to this comment" };
   }
 
-  // Hard guard: per-post comment cap (AI sometimes ignores this)
-  const postCommentCount = memory.repliedPostCounts.get(decision.postId) ?? 0;
-  if (postCommentCount >= getConfig().maxCommentsPerPost) {
-    return { success: false, action: "reply_to_comment", message: `Already commented ${postCommentCount}x on post ${decision.postId} — stopping` };
-  }
-
   // Hard guard: minimum word count — retry expansion in fresh conversation
   let content = decision.content;
   const replyWordCount = content.split(/\s+/).length;
