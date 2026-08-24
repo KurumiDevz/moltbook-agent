@@ -16,7 +16,7 @@
 
 import { create, type GemaiClient } from "nimji";
 import { http } from "./http.js";
-import { saveCookies, loadConversation, saveConversation } from "./session-manager.js";
+import { saveCookies, loadCookies, loadConversation, saveConversation } from "./session-manager.js";
 import type { GenerateRequest, GenerateResponse, Provider, ProviderCapabilities, ProviderConfig } from "./provider.js";
 
 export type GeminiProviderConfig = ProviderConfig & {
@@ -108,7 +108,9 @@ export class GeminiProvider implements Provider {
     this.config = config;
     this.conversationKey = config.conversationKey ?? "main";
 
-    let cookies = config.cookies ?? (config.options?.cookies as string) ?? process.env.COOKIES ?? "";
+    // Load cookies: prefer saved (fresh) from gemini-session.json, fall back to .env
+    const savedCookies = loadCookies();
+    let cookies = savedCookies.cookies ?? config.cookies ?? (config.options?.cookies as string) ?? process.env.COOKIES ?? "";
     if (!cookies) {
       throw new Error(
         "Gemini provider requires COOKIES environment variable or config.cookies. " +
