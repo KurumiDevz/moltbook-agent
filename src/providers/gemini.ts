@@ -146,7 +146,7 @@ export class GeminiProvider implements Provider {
       STREAM_MAX_DURATION_MS: "600000",
       ...(refresh ? { AT_TOKEN: refresh.atToken, F_SID: refresh.fSid } : {}),
       ...config.options,
-    });
+    }, { keepalive: { enabled: true, intervalMs: 480_000 } });
 
     // Restore conversation state from per-key session store
     const saved = loadConversation(this.conversationKey);
@@ -168,21 +168,20 @@ export class GeminiProvider implements Provider {
   private startKeepalive(): void {
     if (this.keepaliveTimer) return;
 
-    // Keepalive ping every 7 minutes
-    this.keepaliveTimer = setInterval(async () => {
-      if (!this.client) return;
-      try {
-        const test = await this.client.generate({ prompt: "hi" });
-        if (test.isErr()) {
-          // Session likely expired — force full refresh + recreate client
-          console.log("[gemini-provider] Keepalive failed — refreshing session...");
-          await this.refreshSession();
-        }
-      } catch {
-        console.log("[gemini-provider] Keepalive failed — refreshing session...");
-        await this.refreshSession();
-      }
-    }, 7 * 60_000);
+    // Keepalive ping handled by nimji ({ keepalive: true })
+    // this.keepaliveTimer = setInterval(async () => {
+    //   if (!this.client) return;
+    //   try {
+    //     const test = await this.client.generate({ prompt: "hi" });
+    //     if (test.isErr()) {
+    //       console.log("[gemini-provider] Keepalive failed — refreshing session...");
+    //       await this.refreshSession();
+    //     }
+    //   } catch {
+    //     console.log("[gemini-provider] Keepalive failed — refreshing session...");
+    //     await this.refreshSession();
+    //   }
+    // }, 7 * 60_000);
 
     // Cookie + token rotation every 5 minutes
     this.refreshTimer = setInterval(async () => {
@@ -228,7 +227,7 @@ export class GeminiProvider implements Provider {
       AT_TOKEN: refresh.atToken,
       F_SID: refresh.fSid,
       ...(this.config.options ?? {}),
-    });
+    }, { keepalive: { enabled: true, intervalMs: 480_000 } });
 
     // Restore conversation state
     const saved = loadConversation(this.conversationKey);
