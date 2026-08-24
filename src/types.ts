@@ -179,6 +179,18 @@ export type FeedPost = {
   createdAt: string;
 };
 
+/** Comment snippet from a feed post's thread — used to let AI join conversations */
+export type CommentThread = {
+  postId: string;
+  postTitle: string;
+  comments: Array<{
+    id: string;
+    author: string;
+    content: string;
+    upvotes: number;
+  }>;
+};
+
 /** Notification item used by the brain (normalized from API) */
 export type NotificationItem = {
   type: string;

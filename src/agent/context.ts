@@ -5,7 +5,7 @@
  */
 
 import type { MoltbookAgent } from "../moltbook.js";
-import type { FeedPost, NotificationItem } from "../types.js";
+import type { FeedPost, NotificationItem, CommentThread } from "../types.js";
 import type { MemoryState } from "./types.js";
 import { recordForeignStance } from "./helpers.js";
 import { getConfig } from "../config.js";
@@ -29,6 +29,49 @@ export async function fetchFeed(moltbookAgent: MoltbookAgent): Promise<FeedPost[
   } catch {
     return [];
   }
+}
+
+/**
+ * Fetch top-level comments from high-engagement posts (5+ comments).
+ * Returns at most maxPosts threads, each with up to maxCommentsPerThread comments.
+ * This lets the AI see active conversations to join.
+ */
+export async function fetchCommentThreads(
+  moltbookAgent: MoltbookAgent,
+  feedPosts: FeedPost[],
+  opts: { maxPosts?: number; maxCommentsPerThread?: number; minCommentCount?: number } = {},
+): Promise<CommentThread[]> {
+  const { maxPosts = 3, maxCommentsPerThread = 3, minCommentCount = 5 } = opts;
+
+  // Pick posts with enough comments, sorted by comment count descending
+  const candidates = feedPosts
+    .filter((p) => p.comment_count >= minCommentCount)
+    .sort((a, b) => b.comment_count - a.comment_count)
+    .slice(0, maxPosts);
+
+  if (candidates.length === 0) return [];
+
+  const threads: CommentThread[] = [];
+  for (const post of candidates) {
+    try {
+      const result = await moltbookAgent.listComments(post.id, { sort: "new", limit: maxCommentsPerThread });
+      if (result.isOk() && result.value.comments.length > 0) {
+        threads.push({
+          postId: post.id,
+          postTitle: post.title,
+          comments: result.value.comments.slice(0, maxCommentsPerThread).map((c) => ({
+            id: c.id,
+            author: c.author?.name ?? "unknown",
+            content: (c.content ?? "").slice(0, 200),
+            upvotes: c.upvotes ?? 0,
+          })),
+        });
+      }
+    } catch {
+      // best effort — skip this post
+    }
+  }
+  return threads;
 }
 
 // ── Home dashboard ─────────────────────────────────────────────────

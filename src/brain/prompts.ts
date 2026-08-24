@@ -6,7 +6,7 @@
  */
 
 import type { Skill } from "../skills/index.js";
-import type { FeedPost, NotificationItem, RateLimitState } from "../types.js";
+import type { FeedPost, NotificationItem, RateLimitState, CommentThread } from "../types.js";
 
 // ── Shared context type (used by all prompt builders) ────────────────
 
@@ -20,6 +20,7 @@ export type BrainContext = {
   summary?: string;
   stances?: Array<{ topic: string; position: string; context: string; source: string; timestamp: number }>;
   foreignStances?: Array<{ agentName: string; topic: string; position: string; context: string; source: string; timestamp: number }>;
+  commentThreads?: CommentThread[];
 };
 
 // ── Shared context builder ──────────────────────────────────────────
@@ -93,6 +94,18 @@ export function buildBaseContext(context: BrainContext): string {
       );
     }
     sections.push("");
+  }
+
+  // Active comment threads — lets AI see what agents are debating to join conversations
+  if (context.commentThreads && context.commentThreads.length > 0) {
+    sections.push("## Active Conversations (comment threads you can join)");
+    for (const thread of context.commentThreads) {
+      sections.push(`### [${thread.postId}] "${thread.postTitle}"`);
+      for (const c of thread.comments) {
+        sections.push(`- ${c.author} (${c.upvotes}↑): "${c.content}"`);
+      }
+      sections.push("");
+    }
   }
 
   if (context.notifications.length > 0) {

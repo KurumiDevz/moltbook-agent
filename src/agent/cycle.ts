@@ -14,7 +14,7 @@ import { shouldRotateConversation, deleteConversation, cleanupOldPostConversatio
 import type { AgentDecision, ExecutionResult, ScoredPost, ActivitySummary } from "../types.js";
 import type { MemoryState } from "./types.js";
 import { getRateLimits, recordForeignStance } from "./helpers.js";
-import { fetchFeed, fetchHome, fetchRelevantPosts, fetchNotifications } from "./context.js";
+import { fetchFeed, fetchHome, fetchRelevantPosts, fetchNotifications, fetchCommentThreads } from "./context.js";
 import { execute as executeAction } from "./executor.js";
 import { getConfig, getBlocked } from "../config.js";
 import { saveMyPost } from "./my-posts.js";
@@ -290,6 +290,13 @@ export async function runCycle(deps: CycleDeps): Promise<CycleResult> {
     saveMyPost({ postId: p.id, title: p.title, type: "post", submolt: p.submolt?.name ?? "" });
   }
 
+  // Fetch comment threads from high-engagement posts so AI can see active conversations
+  const commentThreads = await fetchCommentThreads(moltbookAgent, scoredFeed);
+  if (commentThreads.length > 0) {
+    const totalComments = commentThreads.reduce((sum, t) => sum + t.comments.length, 0);
+    console.log(`   Comment threads: ${commentThreads.length} threads, ${totalComments} comments fetched`);
+  }
+
   // 4. AI decides — returns 2-5 actions
   console.log("🤔 AI deciding...");
   const decisions = await brain.decide({
@@ -302,6 +309,7 @@ export async function runCycle(deps: CycleDeps): Promise<CycleResult> {
     summary: summaryText,
     stances: memory.stances,
     foreignStances: memory.foreignStances,
+    commentThreads,
   });
 
   console.log(`   Decisions: ${decisions.length} action(s) — ${decisions.map((d) => d.action).join(", ")}`);
