@@ -166,35 +166,26 @@ export class GeminiProvider implements Provider {
   private startKeepalive(): void {
     if (this.keepaliveTimer) return;
 
-    // Keepalive ping every 10 minutes
+    // Keepalive ping every 5 minutes (was 10 — too slow to catch expiry)
     this.keepaliveTimer = setInterval(async () => {
       if (!this.client) return;
       try {
-        await this.client.generate({ prompt: "hi" });
-        if (process.env.DEBUG) {
-          console.log("[gemini-provider] Keepalive ping sent");
+        const test = await this.client.generate({ prompt: "hi" });
+        if (test.isErr()) {
+          // Session likely expired — force full refresh + recreate client
+          console.log("[gemini-provider] Keepalive failed — refreshing session...");
+          await this.refreshSession();
         }
       } catch {
-        if (process.env.DEBUG) {
-          console.log("[gemini-provider] Keepalive ping failed");
-        }
+        console.log("[gemini-provider] Keepalive failed — refreshing session...");
+        await this.refreshSession();
       }
-    }, 10 * 60_000);
+    }, 5 * 60_000);
 
-    // Cookie rotation every 8 minutes
+    // Cookie + token rotation every 5 minutes (was 8 — too slow)
     this.refreshTimer = setInterval(async () => {
-      const refresh = await refreshSession({
-        cookies: this.effectiveCookies,
-        userAgent: this.config?.options?.userAgent as string,
-      });
-      if (refresh) {
-        this.effectiveCookies = refresh.cookies;
-        saveCookies({ cookies: refresh.cookies });
-        if (process.env.DEBUG) {
-          console.log("[gemini-provider] Cookies rotated");
-        }
-      }
-    }, 8 * 60_000);
+      await this.refreshSession();
+    }, 5 * 60_000);
   }
 
   private stopKeepalive(): void {
@@ -206,6 +197,48 @@ export class GeminiProvider implements Provider {
       clearInterval(this.refreshTimer);
       this.refreshTimer = null;
     }
+  }
+
+  /** Full session refresh: rotate cookies + fSid + atToken + recreate client */
+  private async refreshSession(): Promise<void> {
+    if (!this.config) return;
+    const refresh = await refreshSession({
+      cookies: this.effectiveCookies,
+      userAgent: this.config.options?.userAgent as string,
+    });
+    if (!refresh) {
+      console.log("[gemini-provider] Session refresh failed — cookies may be expired");
+      return;
+    }
+
+    // Update all auth state
+    this.effectiveCookies = refresh.cookies;
+    this.effectiveFSid = refresh.fSid;
+    this.effectiveAtToken = refresh.atToken;
+    saveCookies({ cookies: refresh.cookies });
+
+    // Recreate nimji client with fresh tokens
+    this.client = create({
+      COOKIES: refresh.cookies,
+      MODEL: this.defaultModel,
+      STREAM_IDLE_TIMEOUT_MS: "120000",
+      STREAM_MAX_DURATION_MS: "600000",
+      AT_TOKEN: refresh.atToken,
+      F_SID: refresh.fSid,
+      ...(this.config.options ?? {}),
+    });
+
+    // Restore conversation state
+    const saved = loadConversation(this.conversationKey);
+    if (saved.conversationId) {
+      this.client.setConversation({
+        conversationId: saved.conversationId,
+        responseId: saved.responseId,
+        choiceId: saved.choiceId,
+      });
+    }
+
+    console.log("[gemini-provider] Session refreshed (cookies + fSid + atToken)");
   }
 
   async generate(request: GenerateRequest): Promise<GenerateResponse> {
