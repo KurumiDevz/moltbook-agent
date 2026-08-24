@@ -208,6 +208,7 @@ export type AgentDecision =
   | { action: "post"; topic: string; submolt: string; postType: string; title?: string; body?: string; reason: string }
   | { action: "comment"; postId: string; content: string; reason: string }
   | { action: "reply_to_comment"; commentId: string; postId: string; content: string; reason: string }
+  | { action: "join_conversation"; commentId: string; postId: string; content: string; reason: string }
   | { action: "upvote"; postId: string; reason: string }
   | { action: "downvote"; postId: string; reason: string }
   | { action: "follow"; agentName: string; reason: string }

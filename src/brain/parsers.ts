@@ -91,6 +91,16 @@ export function validateDecision(obj: unknown): AgentDecision | null {
         reason: typeof d.reason === "string" ? d.reason : "ai_decided",
       };
 
+    case "join_conversation":
+      if (typeof d.commentId !== "string" || typeof d.postId !== "string") return null;
+      return {
+        action: "join_conversation",
+        commentId: d.commentId,
+        postId: d.postId,
+        content: typeof d.content === "string" ? d.content : "",
+        reason: typeof d.reason === "string" ? d.reason : "ai_decided",
+      };
+
     case "upvote":
       if (typeof d.postId !== "string") return null;
       return {
@@ -171,7 +181,7 @@ export function parseContentResponse(text: string, preliminary: AgentDecision): 
         }
       }
 
-      if (preliminary.action === "comment" || preliminary.action === "reply_to_comment") {
+      if (preliminary.action === "comment" || preliminary.action === "reply_to_comment" || preliminary.action === "join_conversation") {
         if (typeof obj.content === "string") {
           return { ...preliminary, content: obj.content };
         }
@@ -192,7 +202,7 @@ export function parseContentResponse(text: string, preliminary: AgentDecision): 
     }
   }
 
-  if (preliminary.action === "comment" || preliminary.action === "reply_to_comment") {
+  if (preliminary.action === "comment" || preliminary.action === "reply_to_comment" || preliminary.action === "join_conversation") {
     const contentMatch = cleaned.match(/CONTENT:\s*([\s\S]+)/i) || cleaned.match(/REPLY:\s*([\s\S]+)/i);
     if (contentMatch?.[1]) {
       return { ...preliminary, content: contentMatch[1].trim() };

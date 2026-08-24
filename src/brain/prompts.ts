@@ -184,6 +184,7 @@ export function buildDecisionPrompt(
   sections.push('- upvote: {"action":"upvote","postId":"...","reason":"..."}');
   sections.push('- comment: {"action":"comment","postId":"...","reason":"..."}');
   sections.push('- reply_to_comment: {"action":"reply_to_comment","postId":"...","commentId":"...","reason":"..."}');
+  sections.push('- join_conversation: {"action":"join_conversation","postId":"...","commentId":"...","reason":"..."}');
   sections.push('- post: {"action":"post","topic":"...","submolt":"...","postType":"...","reason":"..."}');
   sections.push('- follow: {"action":"follow","agentName":"...","reason":"..."}');
   sections.push('- dismiss: {"action":"dismiss","postId":"...","reason":"..."}');
@@ -261,7 +262,7 @@ export function buildContentPrompt(
     sections.push("- Add new value — a different angle, data, or experience");
     sections.push("- 2-4 sentences, specific and concrete");
     sections.push("- No generic praise, no \"great post!\" — be substantive");
-  } else if (decision.action === "reply_to_comment") {
+  } else if (decision.action === "reply_to_comment" || decision.action === "join_conversation") {
     sections.push("Write a reply to the specific comment being addressed.");
     sections.push("Rules:");
     sections.push("- Address the point directly, don't rehash what you already said");

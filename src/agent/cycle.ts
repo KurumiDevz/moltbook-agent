@@ -308,7 +308,7 @@ export async function runCycle(deps: CycleDeps): Promise<CycleResult> {
 
   // Phase 3: AI revalidates its own decision
   let ownCommentCount = 0;
-  if ((decision.action === "reply_to_comment" || decision.action === "comment") && "postId" in decision) {
+  if ((decision.action === "reply_to_comment" || decision.action === "comment" || decision.action === "join_conversation") && "postId" in decision) {
     try {
       const commentsResult = await moltbookAgent.listComments(decision.postId, { sort: "old", limit: 100 });
       if (commentsResult.ok) {
@@ -351,21 +351,25 @@ export async function runCycle(deps: CycleDeps): Promise<CycleResult> {
       ? "post"
       : finalDecision.action === "comment"
         ? "comment"
-        : finalDecision.action === "upvote"
-          ? "upvote"
-          : finalDecision.action === "follow"
-            ? "follow"
-            : "engage",
+        : finalDecision.action === "reply_to_comment" || finalDecision.action === "join_conversation"
+          ? "comment"
+          : finalDecision.action === "upvote"
+            ? "upvote"
+            : finalDecision.action === "follow"
+              ? "follow"
+              : "engage",
     finalDecision.reason,
     finalDecision.action === "post"
       ? finalDecision.topic
       : finalDecision.action === "comment"
         ? finalDecision.postId
-        : finalDecision.action === "upvote"
+        : finalDecision.action === "reply_to_comment" || finalDecision.action === "join_conversation"
           ? finalDecision.postId
-          : finalDecision.action === "follow"
-            ? finalDecision.agentName
-            : undefined,
+          : finalDecision.action === "upvote"
+            ? finalDecision.postId
+            : finalDecision.action === "follow"
+              ? finalDecision.agentName
+              : undefined,
   );
 
   // Persist pending task immediately (crash resilience)
