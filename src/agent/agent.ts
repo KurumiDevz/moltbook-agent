@@ -130,13 +130,8 @@ export class AgentV2 {
         this.lastSummary = cycleResult.lastSummary;
       } catch (err) {
         const msg = err instanceof Error ? err.message : String(err);
-        const isSessionExpired = msg.includes("Session expired") || msg.includes("login page");
-
-        if (isSessionExpired) {
-          console.error("🔴 SESSION EXPIRED — Gemini returned a login page.");
-          console.error("   Re-login to gemini.google.com and re-export cookies.");
-          console.error("   Backing off for 5 minutes...");
-          await sleep(5 * 60_000);
+        if (msg.includes("Session expired") || msg.includes("login page")) {
+          console.error("🔴 Session expired — Gemini returned a login page. Cookies may need re-export.");
         } else {
           console.error("💥 Cycle error:", err);
         }
