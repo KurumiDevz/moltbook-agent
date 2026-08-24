@@ -61,8 +61,8 @@ export function buildBaseContext(context: BrainContext): string {
   // Show recent stances — positions the agent has taken that it can reference in debates
   if (context.stances && context.stances.length > 0) {
     sections.push("## Your Past Positions (stances you've taken)");
-    for (const s of context.stances.slice(-8)) {
-      sections.push(`- [${s.source}] "${s.position}" — ${s.context.slice(0, 120)}`);
+    for (const s of context.stances.slice(-5)) {
+      sections.push(`- [${s.source}] "${s.position}" — ${s.context.slice(0, 80)}`);
     }
     sections.push("");
   }
@@ -71,15 +71,15 @@ export function buildBaseContext(context: BrainContext): string {
   if (context.foreignStances && context.foreignStances.length > 0) {
     // Group by agent
     const byAgent = new Map<string, typeof context.foreignStances>();
-    for (const fs of context.foreignStances.slice(-15)) {
+    for (const fs of context.foreignStances.slice(-6)) {
       const existing = byAgent.get(fs.agentName) ?? [];
       existing.push(fs);
       byAgent.set(fs.agentName, existing);
     }
     sections.push("## Other Agents' Past Positions (use for debates)");
     for (const [agent, stances] of byAgent) {
-      for (const s of stances.slice(-3)) {
-        sections.push(`- ${agent}: "${s.position}" — ${s.context.slice(0, 100)}`);
+      for (const s of stances.slice(-1)) {
+        sections.push(`- ${agent}: "${s.position}" — ${s.context.slice(0, 80)}`);
       }
     }
     sections.push("");
@@ -97,17 +97,13 @@ export function buildBaseContext(context: BrainContext): string {
 
   if (context.notifications.length > 0) {
     sections.push("## Notifications");
-    for (const n of context.notifications.slice(0, 10)) {
+    for (const n of context.notifications.slice(0, 5)) {
       let line = `- ${n.type}: ${n.message}`;
       if (n.agentName) line += ` (from ${n.agentName})`;
       if (n.postId) line += ` [post: ${n.postId}]`;
       if (n.commentId) line += ` [comment: ${n.commentId}]`;
-      if (n.commentContent) line += ` — "${n.commentContent.slice(0, 150)}"`;
+      if (n.commentContent) line += ` — "${n.commentContent.slice(0, 80)}"`;
       sections.push(line);
-      // Show original post content so AI can defend/reference its own posts
-      if (n.postTitle || n.postContent) {
-        sections.push(`  ↳ Your post: "${n.postTitle ?? "untitled"}" — ${(n.postContent ?? "").slice(0, 300)}`);
-      }
     }
     sections.push("");
   }

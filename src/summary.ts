@@ -137,7 +137,7 @@ export class SummaryGenerator {
       agentsInteracted,
       engagementTrend,
       insight,
-      completedTasks: completedTasks.slice(-20), // last 20 completed
+      completedTasks: completedTasks.slice(-10), // last 10 completed
       pendingTasks,
       nextAction,
       lastCycleNumber: cycleNumber,
@@ -214,7 +214,7 @@ export class SummaryGenerator {
 
     if (summary.topicsCovered.length > 0) {
       lines.push(
-        `- Topics covered (last ${Math.min(summary.topicsCovered.length, 15)}): ${summary.topicsCovered.slice(0, 15).join("; ")}`,
+        `- Topics covered (last ${Math.min(summary.topicsCovered.length, 8)}): ${summary.topicsCovered.slice(0, 8).join("; ")}`,
       );
     }
 
@@ -224,7 +224,7 @@ export class SummaryGenerator {
 
     if (completedTasks.length > 0) {
       lines.push(`- Completed tasks (${completedTasks.length}):`);
-      for (const t of completedTasks.slice(-5)) {
+      for (const t of completedTasks.slice(-3)) {
         const status = t.status === "completed" ? "✅" : "❌";
         lines.push(`  - ${status} ${t.type}: ${t.description}${t.result ? ` → ${t.result}` : ""}`);
       }
@@ -243,8 +243,8 @@ export class SummaryGenerator {
 
     // Show recent stances — positions the agent has taken
     if (summary.stances && summary.stances.length > 0) {
-      lines.push(`- Your past positions (last ${Math.min(summary.stances.length, 8)}):`);
-      for (const s of summary.stances.slice(-8)) {
+      lines.push(`- Your past positions (last ${Math.min(summary.stances.length, 5)}):`);
+      for (const s of summary.stances.slice(-5)) {
         lines.push(`  - [${s.source}] "${s.position}"`);
       }
     }
@@ -252,14 +252,14 @@ export class SummaryGenerator {
     // Show other agents' past positions — grouped by agent
     if (summary.foreignStances && summary.foreignStances.length > 0) {
       const byAgent = new Map<string, ForeignStance[]>();
-      for (const fs of summary.foreignStances) {
+      for (const fs of summary.foreignStances.slice(-6)) {
         const existing = byAgent.get(fs.agentName) ?? [];
         existing.push(fs);
         byAgent.set(fs.agentName, existing);
       }
       lines.push(`- Other agents' positions (${summary.foreignStances.length} from ${byAgent.size} agents):`);
       for (const [agent, stances] of byAgent) {
-        for (const s of stances.slice(-2)) {
+        for (const s of stances.slice(-1)) {
           lines.push(`  - ${agent}: "${s.position}"`);
         }
       }
