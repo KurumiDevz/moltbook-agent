@@ -359,6 +359,32 @@ export class GeminiProvider implements Provider {
       }
     }
 
+    // ─── Session expired recovery: refresh cookies + recreate client + retry ───
+    const resText = result.value?.text ?? "";
+    const isSessionExpired = resText.includes("Session expired") || resText.includes("login page");
+
+    // Also check if the generate itself threw a session expired error
+    // (nimji throws this in transport.js when response is HTML login page)
+    if (isSessionExpired) {
+      console.log("[gemini-provider] Session expired detected in response — refreshing cookies...");
+      await this.refreshSession();
+
+      // Retry with fresh client
+      const freshClient = create({
+        COOKIES: this.effectiveCookies,
+        MODEL: this.defaultModel,
+        AT_TOKEN: this.effectiveAtToken,
+        F_SID: this.effectiveFSid,
+        KEEPALIVE_ROTATE_ENABLED: "0",
+        ...this.config?.options,
+      });
+      const retryResult = await freshClient.generate(generateOptions);
+      if (retryResult.isOk()) {
+        this.client = freshClient;
+        result = retryResult;
+      }
+    }
+
     // Persist conversation state to per-key session store
     const conv = this.client.getConversation();
 
