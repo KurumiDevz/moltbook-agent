@@ -329,7 +329,18 @@ export class AgentV2 {
     const MAX_COMMENTS_PER_POST = 2;
     const notifications = allNotifications.filter((n) => {
       if (n.postId && blockedPostIds.has(n.postId)) return false; // blocked post
-      if (n.postId && (this.memory.repliedPostCounts.get(n.postId) ?? 0) >= MAX_COMMENTS_PER_POST) return false; // already commented enough on this post
+
+      // Per-post cap: block NEW top-level comments on capped posts
+      // BUT allow reply notifications (someone replied to our comment) through
+      if (n.postId) {
+        const postCommentCount = this.memory.repliedPostCounts.get(n.postId) ?? 0;
+        if (postCommentCount >= MAX_COMMENTS_PER_POST) {
+          const isReplyToUs = n.type === "comment_reply";
+          if (!isReplyToUs) return false; // block top-level comment notifications on capped posts
+          // reply notifications still pass — we can engage in threads we're already in
+        }
+      }
+
       if (n.commentId && this.memory.repliedCommentIds.has(n.commentId)) {
         return false; // already replied
       }
