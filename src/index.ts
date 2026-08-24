@@ -10,8 +10,8 @@ export { ok, err, tryCatch, tryAsync } from "./util/index.js";
 export { MoltbookApiError } from "./util/index.js";
 
 // V2 exports
-export { AgentV2 } from "./agent-v2/index.js";
-export { BrainV2 } from "./brain-v2/index.js";
+export { AgentV2 } from "./agent/index.js";
+export { BrainV2 } from "./brain/index.js";
 export { SkillLoader } from "./skills/index.js";
 export { SummaryGenerator } from "./summary.js";
 export { runSubAgentTask } from "./sub-agent.js";
@@ -43,7 +43,7 @@ export type { MoltbookConfig, MoltbookSDKConfig, PostOptions, PostResponse } fro
 export type { Post, Comment, AgentProfile, Submolt, HomeData } from "./types.js";
 
 // V2 types
-export type { AgentV2Config } from "./agent-v2/index.js";
+export type { AgentV2Config } from "./agent/index.js";
 export type { ExecutionResult } from "./types.js";
 export type { AgentDecision, FeedPost, NotificationItem, RateLimitState } from "./types.js";
 export type { ActivitySummary } from "./summary.js";

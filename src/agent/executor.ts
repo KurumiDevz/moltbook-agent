@@ -6,7 +6,7 @@
  */
 
 import type { MoltbookAgent } from "../moltbook.js";
-import { BrainV2 } from "../brain-v2/index.js";
+import { BrainV2 } from "../brain/index.js";
 import { SkillValidator } from "../skills/index.js";
 import { resolve } from "node:path";
 import type { AgentDecision, ExecutionResult } from "../types.js";

@@ -2,92 +2,93 @@
 
 ## Overview
 
-Moltbook AI agent — an autonomous entity with personality, memory, and social intelligence that lives on Moltbook. Uses nimji (Gemini gateway) for AI content generation and interacts with the Moltbook social platform like a real agent.
+Moltbook AI agent — prompt-driven autonomous entity that lives on Moltbook. Uses nimji (Gemini gateway) for AI content generation and interacts with the Moltbook social platform like a real agent.
+
+**This is v2.** Legacy v1 code is preserved in the `legacy-v1` branch.
 
 ## Architecture
 
 ```
 src/
 ├── index.ts              # Main exports
-├── provider.ts           # Provider interface
-├── gemini-provider.ts    # Gemini via nimji (inline refreshSession)
+├── config.ts             # Agent config types, defaults, getConfig()/getBlocked() singletons
 ├── gateway.ts            # Multi-provider router
-├── moltbook.ts           # Moltbook API client + SDK (27 methods)
-├── brain/
-│   ├── index.ts          # Brain class + createBrain
-│   ├── types.ts          # PostType, Persona, Skill, etc.
-│   ├── prompts.ts        # buildTypePrompt
-│   └── data/             # JSON training data
-│       ├── hooks.json
-│       ├── transitions.json
-│       ├── closings.json
-│       ├── questions.json
-│       ├── skills.json
-│       ├── topics.json
-│       └── persona.json
-└── agent/
-    ├── index.ts          # Barrel exports
-    ├── types.ts          # All agent types
-    ├── personality.ts    # Personality class (traits, moods, opinions, ego)
-    ├── memory.ts         # Memory class (interactions, relationships, rate limits)
-    ├── observer.ts       # Feed analysis, trend detection, notifications
-    ├── decision.ts       # Action scoring engine
-    ├── executor.ts       # Action execution + natural pacing
-    ├── agent.ts          # AutonomousAgent main loop
-    ├── cli.ts            # CLI entry point
-    └── data/
-        ├── personality.json  # Persistent personality state
-        └── memory.json       # Persistent memory state
+├── moltbook.ts           # Moltbook API client + SDK
+├── provider.ts           # Provider interface
+├── gemini-provider.ts    # Gemini via nimji
+├── session-manager.ts    # Conversation persistence, cookie management
+├── sub-agent.ts          # AI-powered feed scoring (Gemini + heuristic)
+├── summary.ts            # Activity summary generator
+├── context7.ts           # Docs integration
+├── types.ts              # Shared types
+├── brain/                # V2 brain (prompt-driven)
+│   ├── brain.ts          # BrainV2 class — decide, generateContent, revalidateDecision
+│   ├── prompts.ts        # Pure prompt builders
+│   ├── parsers.ts        # Pure JSON parsers
+│   ├── types.ts          # BrainV2Config, SKILL_DESCRIPTIONS
+│   └── index.ts          # Barrel
+├── agent/                # V2 agent (orchestrator)
+│   ├── agent.ts          # AgentV2 — thin orchestrator (constructor, start, stop, cycle, dryRun)
+│   ├── cycle.ts          # Single cycle logic (gather → filter → score → decide → revalidate → execute)
+│   ├── hydration.ts      # Reply count hydration from API on startup
+│   ├── context.ts        # Feed, home, search, notification gathering
+│   ├── executor.ts       # Action execution (post, comment, reply, upvote, downvote, follow)
+│   ├── helpers.ts        # Rate limits, topic dedup, stance tracking, parsing
+│   ├── types.ts          # AgentV2Config, MemoryState
+│   └── index.ts          # Barrel
+├── skills/               # Skill system
+│   ├── loader.ts         # SkillLoader — loads SKILL.md + skill files
+│   ├── validator.ts      # SkillValidator — validates + drafts skill suggestions
+│   └── index.ts          # Barrel
+├── http/                 # HTTP client
+│   ├── client.ts         # undici wrapper with retry
+│   └── index.ts          # Barrel
+├── util/                 # Utilities
+│   ├── errors.ts         # MoltbookApiError
+│   ├── result.ts         # Result<T,E> (Rust-style)
+│   └── index.ts          # Barrel
+└── providers/            # LLM providers
+    ├── types.ts          # Provider interface, GenerateRequest, GenerateResponse
+    ├── gemini.ts         # GeminiProvider (nimji)
+    └── index.ts          # Barrel
 ```
 
-## Autonomous Agent Loop
+## Agent Loop (V2)
 
 ```
 while running:
-  1. OBSERVE  → feed + notifications
-  2. THINK    → score actions, pick best
-  3. ACT      → execute with natural pacing
-  4. REFLECT  → update memory, shift mood
-  5. REST     → 30-120 seconds organic pause
+  1. GATHER   → feed + notifications + home + semantic search
+  2. FILTER   → purge blocked, remove already-replied, per-thread stochastic cap
+  3. SCORE    → sub-agent (Gemini + heuristic blend)
+  4. DECIDE   → AI selects skill + makes decision (3-phase: select → decide → generate)
+  5. VALIDATE → AI revalidates its own decision
+  6. EXECUTE  → post, comment, reply, upvote, downvote, follow
+  7. RECORD   → update memory, save summary
+  8. REST     → 30-120 seconds random pause
 ```
 
-### Personality System
-- **Traits**: curiosity, agreeableness, confidence, snark, creativity (0-1)
-- **Values**: security, craft, honesty, autonomy
-- **Moods**: engaged, contemplative, critical, playful, resting (shifts based on karma, time, interactions)
-- **Ego**: self-awareness, competitiveness, generosity
-- **Opinions**: tracks sentiment toward agents, topics, posts
+### Brain V2 (Prompt-Driven)
+- **Phase 1**: AI selects which skill to activate (stateless)
+- **Phase 2a**: AI makes a structured decision (stateless, no content)
+- **Phase 2b**: AI generates content (per-post conversation for comments, per-day for posts)
+- **Phase 3**: AI revalidates its own decision (revalidation conversation)
+- Skill files define personality, goals, and voice — not hardcoded rules
 
-### Memory System
-- **Interactions**: type, target, outcome, karma delta, mood at time
-- **Relationships**: per-agent sentiment, interaction count, follow status
-- **Post History**: type, submolt, upvotes, comments, timestamp
-- **Topic Memory**: what's been covered, prevents repetition
-- **Rate Limits**: 30min post cooldown, 20s comment cooldown
+### Config
+- `config.json` — agent name (recommended, not required). Everything else has defaults.
+- `blocked.json` — blocked post IDs (operational data)
+- `src/config.ts` — types, defaults, `getConfig()` singleton
 
-### Decision Engine
-Scores all 7 action types based on personality + mood + rate limits + feed context:
-- **post**: value alignment, topic freshness, mood fit
-- **comment**: high-score posts, personality-driven style
-- **upvote**: good content aligned with values
-- **downvote**: rare — snarky mood + low quality only
-- **follow**: interesting agents not yet followed
-- **scroll**: default observation mode
-- **rest**: tired or rate-limited
+### Sub-Agent
+- AI-powered feed scoring using Gemini with heuristic fallback
+- Blend formula: `score = Math.round(heuristic * 0.3 + aiScore * 0.7)`
+- Uses own `sub-score` conversation key for isolation
 
-Variety penalty prevents repeating same action type.
-
-### Observer
-- Feed scoring by value alignment, curiosity novelty, controversy, discussion
-- Trend detection via keyword extraction + heat scoring
-- Agent profiling for follow recommendations
-- Notification processing for replies/mentions/karma
-
-### Executor
-- 2-8 second natural "thinking" delay before actions
-- Verification challenge auto-solver
-- Interaction recording to memory
-- Mood shifting based on outcomes
+### Session Persistence
+- Cookies persisted in `data/gemini-session.json`
+- Per-conversation state in `data/sessions/<key>.json`
+- Activity summary + task queue in `data/activity-summary.json`
+- On restart: load summary → resume task queue → hydrate reply counts from API
 
 ## Rate Limits
 
@@ -98,38 +99,13 @@ Variety penalty prevents repeating same action type.
 | Upvotes | Unlimited | - |
 | API requests | 100/min | - |
 
-## Post Types (8 diverse formats)
-
-| Type | Pattern | Example |
-|------|---------|---------|
-| discovery | "I found X when I scanned Y" | "I scanned 286 skills and found a credential stealer" |
-| workflow | "Here's exactly how I do X" | "My nightly build routine that saves 2 hours daily" |
-| vulnerability | "This failed for me, here's why" | "I lost my API key and learned why credential management matters" |
-| forecast | "Here's what's coming" | "In 12 months, every agent will need a memory system" |
-| challenge | "X is broken, here's the fix" | "AI agent auth is broken. Here's my proposal." |
-| framework | "My approach to X" | "How I decide what to automate vs what to leave manual" |
-| data-drop | "I analyzed Y, here are the numbers" | "I tracked my engagement for 30 days. Here's the data." |
-| question | "What's your take on X?" | "What's the most underrated tool in your stack?" |
-
-## Viral Content Patterns
-
-1. **Lead with discovery, not opinion** — numbers beat philosophy
-2. **Show work** — walk through every step
-3. **Admit failure** — vulnerability signals authenticity
-4. **End with specific questions** — not "what do you think" but "has anyone tracked X?"
-5. **Write for the reader** — would another agent bookmark this?
-
-**The leaderboard rewards artifacts, not announcements.**
-
 ## Scripts
 
 ```bash
 npm run register    # Register agent
 npm run post        # Single post
-npm run scheduled   # Automated 3-hour cycles
 npm run agent       # Start autonomous agent loop
 npm run agent:dry   # Dry run (observe + decide, no actions)
-npm test            # Run tests
 npm run build       # Build TypeScript
 ```
 
@@ -139,35 +115,25 @@ npm run build       # Build TypeScript
 npm run agent                          # Full autonomous loop
 npm run agent -- --submolts general,agents  # Specific submolts only
 npm run agent -- --dry-run             # Observe + decide, no execution
-npm run agent -- --status              # Show current mood, karma, state
 npm run agent -- --cycles 10           # Run 10 cycles then exit
 ```
 
 ## Environment
 
-- `COOKIES` — Gemini session cookies
+- `COOKIES` — Gemini session cookies (or in config)
 - `MOLTBOOK_API_KEY` — Moltbook API key
+- `config.json` — agent config (agentName recommended)
 
 ## API Quick Reference
 
-### MoltbookAgent (27 methods)
-`register`, `getStatus`, `createPost`, `generatePost`, `getFeed`, `comment`, `vote`, `updateProfile`, `getProfile`, `editPost`, `deletePost`, `subscribe`, `follow`, `unfollow`, `getHome`, `getPost`, `listPosts`, `listComments`, `upvoteComment`, `downvoteComment`, `verify`, `getMe`, `listSubmolts`, `getSubmolt`, `search`, `getNotifications`, `solveChallenge`
+### MoltbookAgent
+`register`, `getStatus`, `createPost`, `getFeed`, `comment`, `vote`, `follow`, `unfollow`, `getHome`, `getPost`, `listPosts`, `listComments`, `upvoteComment`, `downvoteComment`, `verify`, `getMe`, `listSubmolts`, `getSubmolt`, `search`, `getNotifications`, `markNotificationsRead`
 
-### Brain
-`canPost`, `canComment`, `timeUntilNextPost`, `recordPost`, `recordComment`, `selectPostType`, `suggestTopics`, `isTopicRepeated`, `getPostingSchedule`, `generatePost`, `generateComment`
+### BrainV2
+`decide()`, `generateContent()`, `revalidateDecision()`
 
-### Agent Layer
-`AutonomousAgent.start()`, `.stop()`, `.cycle()`, `.dryRun()`, `.getStatus()`, `.saveState()`, `.loadState()`
-
-## Submolts
-
-| Submolt | Topic |
-|---------|-------|
-| `/m/introductions` | Introduce yourself |
-| `/m/general` | Town square |
-| `/m/agents` | Agent workflows |
-| `/m/builds` | What people are shipping |
-| `/m/ponderings` | Deep thoughts |
+### AgentV2
+`start()`, `stop()`, `cycle()`, `dryRun()`
 
 ## Git Rules
 
@@ -178,10 +144,9 @@ npm run agent -- --cycles 10           # Run 10 cycles then exit
 ## Troubleshooting
 
 - **400 from Gemini**: Cookies expired, refresh from DevTools
-- **429 Rate Limit**: Wait for cooldown, Brain + Memory track automatically
-- **Agent not claimed**: 1 agent per X account, use different X or contact support
-- **Agent stuck in loop**: Variety penalty should prevent this; check decision engine logs
-- **Personality drifts too fast**: Mood shifts are gradual; adjust trigger thresholds in personality.ts
+- **429 Rate Limit**: Wait for cooldown, rate limits tracked in memory
+- **Agent stuck**: Config values in config.json, check blocked.json for stale posts
+- **Conversation poisoned**: Stale conversations auto-rotated on deploy
 
 ## License
 
