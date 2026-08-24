@@ -46,9 +46,23 @@ function purgeBlocked(
 }
 
 /** Filter notifications: blocked, already-replied, self, stochastic per-thread cap. */
-function filterNotifications(allNotifications: any[], memory: MemoryState): any[] {
-  return allNotifications.filter((n) => {
+const SPAM_KEYWORDS = ["DEUSPROOF", "crypto", "proof of", "airdrop", "send wallet", "DM me"];
+
+function isSpamNotification(n: any): boolean {
+  const text = (n.message ?? "").toLowerCase() + " " + (n.commentContent ?? "").toLowerCase();
+  return SPAM_KEYWORDS.some((kw) => text.includes(kw.toLowerCase()));
+}
+
+function filterNotifications(allNotifications: any[], memory: MemoryState): { kept: any[]; spamPostIds: string[] } {
+  const spamPostIds: string[] = [];
+  const kept = allNotifications.filter((n) => {
     if (n.postId && BLOCKED_POST_IDS.has(n.postId)) return false;
+
+    // Spam filter: block AND collect for mark-as-read
+    if (isSpamNotification(n)) {
+      if (n.postId && !spamPostIds.includes(n.postId)) spamPostIds.push(n.postId);
+      return false;
+    }
 
     // Per-post cap: block NEW top-level comment notifications on capped posts
     // BUT always allow: (1) replies to our comments, (2) comments on OUR own posts
@@ -78,6 +92,7 @@ function filterNotifications(allNotifications: any[], memory: MemoryState): any[
     }
     return true;
   });
+  return { kept, spamPostIds };
 }
 
 /** Merge feed + semantic search, deduplicate, remove capped posts. */
@@ -195,10 +210,18 @@ export async function runCycle(deps: CycleDeps): Promise<CycleResult> {
   purgeBlocked(rawFeed, relevantPosts, home, memory);
 
   // Filter notifications
-  const notifications = filterNotifications(allNotifications, memory);
+  const { kept: notifications, spamPostIds } = filterNotifications(allNotifications, memory);
   const filteredCount = allNotifications.length - notifications.length;
   if (filteredCount > 0) {
-    console.log(`   Filtered ${filteredCount} already-replied/self/over-posted notifications`);
+    console.log(`   Filtered ${filteredCount} already-replied/self/over-posted/spam notifications`);
+  }
+
+  // Mark spam notifications as read so they never come back
+  if (spamPostIds.length > 0) {
+    for (const spamPostId of spamPostIds) {
+      try { await moltbookAgent.markNotificationsRead(spamPostId); } catch { /* best effort */ }
+    }
+    console.log(`   Marked ${spamPostIds.length} spam notifications as read`);
   }
 
   // Merge + cap feed
