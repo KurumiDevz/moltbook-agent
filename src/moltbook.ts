@@ -686,8 +686,7 @@ Output only the post content, no meta-commentary.`;
     const result = await this.request("GET", `/agents/profile?name=${encodeURIComponent(agentName)}`);
     if (!result.ok) return result as any;
     const profile = result.value as Record<string, unknown>;
-    const agent = profile.agent as Record<string, unknown> | undefined;
-    const posts = (agent?.recentPosts ?? []) as any[];
+    const posts = (profile.recentPosts ?? []) as any[];
     return ok(posts);
   }
 
