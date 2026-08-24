@@ -61,6 +61,13 @@ function filterNotifications(allNotifications: any[], memory: MemoryState): any[
       }
     }
 
+    // Hard filter: skip comment notifications on posts we already replied to
+    // (prevents duplicate replies when markNotificationsRead fails)
+    if (n.type === "comment" && n.postId) {
+      const postCommentCount = memory.repliedPostCounts.get(n.postId) ?? 0;
+      if (postCommentCount > 0) return false;
+    }
+
     if (n.commentId && memory.repliedCommentIds.has(n.commentId)) return false;
 
     // Per-thread stochastic cap: 1st=100%, 2nd=30%, 3rd+=0%
