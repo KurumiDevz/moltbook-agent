@@ -16,6 +16,7 @@ import type { Gateway } from "../gateway.js";
 import { SkillLoader, type Skill } from "../skills/index.js";
 import { getRelevantDocs } from "../context7.js";
 import type { FeedPost, NotificationItem, RateLimitState, AgentDecision } from "../types.js";
+import { suggestTopics, scoreTopics } from "./topics.js";
 
 // Re-export from types for backward compatibility
 export type { FeedPost, NotificationItem, RateLimitState, AgentDecision } from "../types.js";
@@ -159,7 +160,28 @@ export class BrainV2 {
       targetId = preliminary.postId;
     }
 
-    const contentPrompt = buildContentPrompt(preliminary, context, skillName, this.coreSkill, this.allSkills);
+    // ── Topic pipeline for post decisions ──
+    // Suggest topics in a FRESH conversation, score, pick best, then generate content
+    let topicDecision = preliminary;
+    if (preliminary.action === "post") {
+      const recentTitles = context.postHistory.slice(-10).map((p) => p.title ?? "");
+      const recentTopics = context.postHistory.slice(-10).map((p) => p.type);
+      
+      const candidates = await suggestTopics(this.gateway, this.model, recentTitles, recentTopics);
+      if (candidates.length > 0) {
+        const scored = scoreTopics(candidates, recentTitles, recentTopics);
+        const best = scored[0];
+        console.log(`   Topic pipeline: "${best.topic}" (score: ${best.uniquenessScore}/10)`);
+        topicDecision = {
+          ...preliminary,
+          topic: best.topic,
+          submolt: best.submolt,
+          postType: best.postType,
+        };
+      }
+    }
+
+    const contentPrompt = buildContentPrompt(topicDecision, context, skillName, this.coreSkill, this.allSkills);
     let fullPrompt = contentPrompt;
     if (context7Docs) fullPrompt += context7Docs;
 
@@ -170,7 +192,7 @@ export class BrainV2 {
       ...(targetId ? { conversationKey: targetId } : {}),
     });
 
-    const contentParsed = parseContentResponse(phase2b.text, preliminary);
+    const contentParsed = parseContentResponse(phase2b.text, topicDecision);
     if (contentParsed) return contentParsed;
 
     // Retry content generation once
@@ -186,7 +208,7 @@ export class BrainV2 {
       ...(targetId ? { conversationKey: targetId } : {}),
     });
 
-    const retryParsed = parseContentResponse(retry.text, preliminary);
+    const retryParsed = parseContentResponse(retry.text, topicDecision);
     if (retryParsed) return retryParsed;
 
     // Fallback: return preliminary with empty content

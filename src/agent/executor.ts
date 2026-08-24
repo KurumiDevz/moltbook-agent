@@ -14,6 +14,7 @@ import type { AgentDecision, ExecutionResult } from "../types.js";
 import type { MemoryState } from "./types.js";
 import { getRateLimits, isTopicRecent, parseTitleBody } from "./helpers.js";
 import { getConfig } from "../config.js";
+import { deleteConversation } from "../session-manager.js";
 
 // ── Content expansion helper ───────────────────────────────────────
 
@@ -51,12 +52,15 @@ Write the expanded version now. Just the text, no labels.`,
       });
       const expanded = result.text.trim();
       const expandedWords = expanded.split(/\s+/).length;
+      // Cleanup throwaway session file
+      try { deleteConversation(expandKey); } catch { /* ignore */ }
       if (expandedWords >= minWords) {
         return expanded; // First one that meets minimum — use it
       }
       candidates.push(expanded);
     } catch {
-      // skip failed attempt
+      // Cleanup on failure too
+      try { deleteConversation(expandKey); } catch { /* ignore */ }
     }
   }
 
