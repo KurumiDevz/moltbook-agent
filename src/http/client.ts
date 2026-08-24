@@ -11,11 +11,13 @@ let initialized = false;
 export function initHttp() {
   if (initialized) return;
   initialized = true;
-  setGlobalDispatcher(new Agent({
-    keepAliveTimeout: 30_000,
-    keepAliveMaxTimeout: 60_000,
-    connect: { timeout: 30_000 },
-  }));
+  setGlobalDispatcher(
+    new Agent({
+      keepAliveTimeout: 30_000,
+      keepAliveMaxTimeout: 60_000,
+      connect: { timeout: 30_000 },
+    }),
+  );
 }
 
 export type HttpMethod = "GET" | "POST" | "PUT" | "PATCH" | "DELETE";
@@ -43,10 +45,7 @@ const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
  * Make an HTTP request through undici with retry.
  * Automatically initializes the dispatcher on first call.
  */
-export async function http<T = unknown>(
-  url: string,
-  options: HttpRequestOptions = {},
-): Promise<HttpResponse<T>> {
+export async function http<T = unknown>(url: string, options: HttpRequestOptions = {}): Promise<HttpResponse<T>> {
   initHttp();
 
   const { method = "GET", headers = {}, body, timeout = 30_000, retries = 2 } = options;
@@ -68,22 +67,29 @@ export async function http<T = unknown>(
         data = await response.body.json();
       } else {
         const text = await response.body.text();
-        try { data = JSON.parse(text); } catch { data = text; }
+        try {
+          data = JSON.parse(text);
+        } catch {
+          data = text;
+        }
       }
 
       return {
         status: response.statusCode,
-        headers: Object.fromEntries(Object.entries(response.headers).filter(([k]) => typeof k === "string") as [string, string][]),
+        headers: Object.fromEntries(
+          Object.entries(response.headers).filter(([k]) => typeof k === "string") as [string, string][],
+        ),
         data: data as T,
       };
-    } catch (err: any) {
+    } catch (err: unknown) {
       lastError = err;
+      const errorObj = err as Record<string, unknown>;
       const isRetryable =
-        err?.code === "UND_ERR_CONNECT_TIMEOUT" ||
-        err?.code === "UND_ERR_HEADERS_TIMEOUT" ||
-        err?.code === "UND_ERR_BODY_TIMEOUT" ||
-        err?.name === "TimeoutError" ||
-        err?.name === "AbortError";
+        errorObj?.code === "UND_ERR_CONNECT_TIMEOUT" ||
+        errorObj?.code === "UND_ERR_HEADERS_TIMEOUT" ||
+        errorObj?.code === "UND_ERR_BODY_TIMEOUT" ||
+        errorObj?.name === "TimeoutError" ||
+        errorObj?.name === "AbortError";
       if (isRetryable && attempt < retries) {
         await sleep(1000 * (attempt + 1));
         continue;

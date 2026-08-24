@@ -8,8 +8,8 @@
  * - Name safety (no path traversal, no reserved names)
  */
 
-import { writeFileSync, mkdirSync, existsSync, readdirSync } from "node:fs";
-import { join, resolve } from "node:path";
+import { writeFileSync, mkdirSync, existsSync, readdirSync, readFileSync, unlinkSync } from "node:fs";
+import { join } from "node:path";
 
 // ── Constants ────────────────────────────────────────────────────────
 
@@ -186,7 +186,7 @@ export class SkillValidator {
     }
 
     try {
-      const content = require("node:fs").readFileSync(draftPath, "utf-8");
+      const content = readFileSync(draftPath, "utf-8");
       writeFileSync(activePath, content, "utf-8");
 
       this.logChangelog({
@@ -208,9 +208,7 @@ export class SkillValidator {
   /** List active skill names. */
   listActiveSkills(): string[] {
     try {
-      const files = readdirSync(this.skillsDir).filter(
-        (f) => f.endsWith(".md") && !f.startsWith("."),
-      );
+      const files = readdirSync(this.skillsDir).filter((f) => f.endsWith(".md") && !f.startsWith("."));
       return files.map((f) => f.replace(/\.md$/, ""));
     } catch {
       return [];
@@ -235,7 +233,7 @@ export class SkillValidator {
     if (!existsSync(filePath)) return false;
 
     try {
-      require("node:fs").unlinkSync(filePath);
+      unlinkSync(filePath);
       this.logChangelog({
         action: "deleted",
         skillName: name,
@@ -251,7 +249,7 @@ export class SkillValidator {
   /** Get the changelog. */
   getChangelog(): SkillChangelogEntry[] {
     try {
-      const data = require("node:fs").readFileSync(this.changelogPath, "utf-8");
+      const data = readFileSync(this.changelogPath, "utf-8");
       return JSON.parse(data);
     } catch {
       return [];

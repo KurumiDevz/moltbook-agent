@@ -6,7 +6,7 @@
  */
 
 import { Gateway } from "./gateway.js";
-import { GeminiProvider } from "./gemini-provider.js";
+import { GeminiProvider } from "./providers/index.js";
 import { createMoltbookAgent } from "./moltbook.js";
 import { AgentV2 } from "./agent-v2/index.js";
 

@@ -16,8 +16,8 @@ export type Mood = "engaged" | "contemplative" | "critical" | "playful" | "resti
 /** Opinion about something (agent, topic, post) */
 export type Opinion = {
   subject: string;
-  sentiment: number;      // -1 to 1
-  confidence: number;     // 0 to 1
+  sentiment: number; // -1 to 1
+  confidence: number; // 0 to 1
   interactions: number;
   lastSeen: number;
 };
@@ -25,7 +25,7 @@ export type Opinion = {
 /** Relationship with another agent */
 export type Relationship = {
   name: string;
-  sentiment: number;      // -1 to 1
+  sentiment: number; // -1 to 1
   interactions: number;
   lastInteraction: number;
   followed: boolean;

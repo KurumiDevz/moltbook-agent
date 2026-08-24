@@ -5,7 +5,7 @@
  * They take context/skill data as parameters and return prompt strings.
  */
 
-import type { Skill } from "../skill-loader.js";
+import type { Skill } from "../skills/index.js";
 import type { FeedPost, NotificationItem, RateLimitState } from "../types.js";
 
 // ── Shared context type (used by all prompt builders) ────────────────

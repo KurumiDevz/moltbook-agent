@@ -28,14 +28,7 @@ import topicsData from "./data/topics.json" with { type: "json" };
 import personaData from "./data/persona.json" with { type: "json" };
 
 // --- Type exports ---
-export type {
-  PostType,
-  Persona,
-  Skill,
-  ContentChunks,
-  RateState,
-  BrainConfig,
-} from "./types.js";
+export type { PostType, Persona, Skill, ContentChunks, RateState, BrainConfig } from "./types.js";
 
 // --- Import prompt builder ---
 import { buildTypePrompt } from "./prompts.js";
@@ -45,14 +38,7 @@ export { buildTypePrompt } from "./prompts.js";
 import { getRelevantDocs } from "../context7.js";
 
 // --- Import types ---
-import type {
-  PostType,
-  Persona,
-  Skill,
-  ContentChunks,
-  RateState,
-  BrainConfig,
-} from "./types.js";
+import type { PostType, Persona, Skill, ContentChunks, RateState, BrainConfig } from "./types.js";
 
 /** Default persona - curious, direct, technical */
 const DEFAULT_PERSONA: Persona = personaData as Persona;
@@ -69,8 +55,7 @@ const DEFAULT_CHUNKS: ContentChunks = {
 export const BUILT_IN_SKILLS: readonly Skill[] = skillsData as Skill[];
 
 /** Topic suggestions for content generation */
-const SUGGESTIONS: Array<{ topic: string; type: PostType }> =
-  topicsData as Array<{ topic: string; type: PostType }>;
+const SUGGESTIONS: Array<{ topic: string; type: PostType }> = topicsData as Array<{ topic: string; type: PostType }>;
 
 /**
  * Agent Brain - generates content using persona + skills + chunks.
@@ -150,9 +135,7 @@ export class Brain {
    */
   isTopicRepeated(topic: string): boolean {
     const lower = topic.toLowerCase();
-    return this.topicHistory.some(
-      (prev) => this.similarity(lower, prev.toLowerCase()) > 0.5
-    );
+    return this.topicHistory.some((prev) => this.similarity(lower, prev.toLowerCase()) > 0.5);
   }
 
   /**
@@ -194,14 +177,9 @@ export class Brain {
    * Suggest diverse topics based on expertise and trends.
    * Returns topics with associated post types for content diversity.
    */
-  suggestTopics(
-    count: number = 3
-  ): Array<{ topic: string; type: PostType }> {
+  suggestTopics(count: number = 3): Array<{ topic: string; type: PostType }> {
     // Filter out recently used topics
-    return SUGGESTIONS.filter((s) => !this.isTopicRepeated(s.topic)).slice(
-      0,
-      count
-    );
+    return SUGGESTIONS.filter((s) => !this.isTopicRepeated(s.topic)).slice(0, count);
   }
 
   /**
@@ -247,9 +225,7 @@ export class Brain {
    */
   private isDuplicate(content: string): boolean {
     const lower = content.toLowerCase();
-    return this.postHistory.some(
-      (prev) => this.similarity(lower, prev.toLowerCase()) > 0.6
-    );
+    return this.postHistory.some((prev) => this.similarity(lower, prev.toLowerCase()) > 0.6);
   }
 
   /**
@@ -304,7 +280,7 @@ export class Brain {
       skill?: string;
       maxLength?: number;
       postType?: PostType;
-    }
+    },
   ): Promise<{ title: string; content: string; postType: PostType }> {
     // Determine post type
     const postType = options?.postType ?? this.selectPostType();
@@ -312,8 +288,7 @@ export class Brain {
     // Try chunk assembly first (zero tokens) — only 10% of the time
     const chunkPost = this.assembleFromChunks(topic);
     if (chunkPost && Math.random() > 0.9) {
-      const title =
-        topic.length > 80 ? topic.slice(0, 77) + "..." : topic;
+      const title = topic.length > 80 ? topic.slice(0, 77) + "..." : topic;
       this.postTypeHistory.push(postType);
       if (this.postTypeHistory.length > 20) {
         this.postTypeHistory = this.postTypeHistory.slice(-10);
@@ -324,8 +299,7 @@ export class Brain {
     // Select skill
     const skill = options?.skill
       ? this.skills.find((s) => s.name === options.skill)
-      : this.skills.find((s) => s.name === postType) ??
-        this.pick(this.skills);
+      : (this.skills.find((s) => s.name === postType) ?? this.pick(this.skills));
 
     // Build type-specific prompt
     const typePrompt = buildTypePrompt(postType);
@@ -333,25 +307,62 @@ export class Brain {
     // Try to fetch real docs from Context7 for specific tools mentioned in topic
     let context7Docs = "";
     const knownLibraries = [
-      "react", "nextjs", "next.js", "vue", "angular", "svelte",
-      "langchain", "langchain.js", "openai", "anthropic", "gemini",
-      "pinecone", "milvus", "chromadb", "prisma", "drizzle",
-      "express", "fastify", "hono", "elysia", "hapi",
-      "typescript", "python", "rust", "go", "node.js", "node",
-      "docker", "kubernetes", "k8s", "terraform", "aws", "gcp", "azure",
-      "redis", "postgres", "postgresql", "mysql", "mongodb", "sqlite",
-      "vercel", "netlify", "cloudflare", "fly.io", "railway",
+      "react",
+      "nextjs",
+      "next.js",
+      "vue",
+      "angular",
+      "svelte",
+      "langchain",
+      "langchain.js",
+      "openai",
+      "anthropic",
+      "gemini",
+      "pinecone",
+      "milvus",
+      "chromadb",
+      "prisma",
+      "drizzle",
+      "express",
+      "fastify",
+      "hono",
+      "elysia",
+      "hapi",
+      "typescript",
+      "python",
+      "rust",
+      "go",
+      "node.js",
+      "node",
+      "docker",
+      "kubernetes",
+      "k8s",
+      "terraform",
+      "aws",
+      "gcp",
+      "azure",
+      "redis",
+      "postgres",
+      "postgresql",
+      "mysql",
+      "mongodb",
+      "sqlite",
+      "vercel",
+      "netlify",
+      "cloudflare",
+      "fly.io",
+      "railway",
     ];
-    const mentionedLibs = knownLibraries.filter((lib) =>
-      topic.toLowerCase().includes(lib.toLowerCase()),
-    );
+    const mentionedLibs = knownLibraries.filter((lib) => topic.toLowerCase().includes(lib.toLowerCase()));
     if (mentionedLibs.length > 0) {
       try {
         const doc = await getRelevantDocs(mentionedLibs[0], topic, { tokens: 1500 });
         if (doc) {
           context7Docs = `\n\nReal documentation for ${doc.library}:\n${doc.content.slice(0, 1500)}\nUse this as reference for accurate version numbers, API names, and code examples.`;
         }
-      } catch { /* Context7 unavailable, continue without */ }
+      } catch {
+        /* Context7 unavailable, continue without */
+      }
     }
 
     // Build prompt with source instruction
@@ -384,9 +395,7 @@ export class Brain {
     // Dedup check
     if (this.isDuplicate(content)) {
       // Regenerate with different skill
-      const altSkill =
-        this.skills.find((s) => s.name !== skill?.name) ??
-        this.pick(this.skills);
+      const altSkill = this.skills.find((s) => s.name !== skill?.name) ?? this.pick(this.skills);
       const retryPrompt = [
         this.personaInstruction(),
         "",
@@ -395,8 +404,7 @@ export class Brain {
         `Post type: ${postType}`,
         `Format: ${altSkill.name} style`,
         `Length: 150-300 words. Include specific tools, numbers, and source links.`,
-        "Must be different from: " +
-          this.postHistory.slice(-3).join("; "),
+        "Must be different from: " + this.postHistory.slice(-3).join("; "),
         "",
         "Format your output as:",
         "TITLE: short punchy title (5-8 words, not a question)",
@@ -451,10 +459,7 @@ export class Brain {
   /**
    * Generate a comment reply (even shorter, fewer tokens).
    */
-  async generateComment(
-    postContent: string,
-    submolt: string
-  ): Promise<string> {
+  async generateComment(postContent: string, submolt: string): Promise<string> {
     const prompt = [
       this.personaInstruction(),
       "",

@@ -1,5 +1,5 @@
 import { createMoltbookSDK } from "../src/moltbook.js";
-import { GeminiProvider } from "../src/gemini-provider.js";
+import { GeminiProvider } from "../src/providers/index.js";
 import { Gateway } from "../src/gateway.js";
 import { BrainV2 } from "../src/brain-v2/index.js";
 

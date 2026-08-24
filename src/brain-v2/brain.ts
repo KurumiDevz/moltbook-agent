@@ -13,7 +13,7 @@
 import { readFileSync } from "node:fs";
 import { resolve } from "node:path";
 import type { Gateway } from "../gateway.js";
-import { SkillLoader, type Skill } from "../skill-loader.js";
+import { SkillLoader, type Skill } from "../skills/index.js";
 import { getRelevantDocs } from "../context7.js";
 import type { FeedPost, NotificationItem, RateLimitState, AgentDecision } from "../types.js";
 

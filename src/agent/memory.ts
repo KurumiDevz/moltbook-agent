@@ -100,9 +100,7 @@ export class Memory {
     for (const p of this.state.postHistory) {
       counts.set(p.type, (counts.get(p.type) ?? 0) + p.upvotes);
     }
-    return [...counts.entries()]
-      .sort((a, b) => b[1] - a[1])
-      .map(([type]) => type);
+    return [...counts.entries()].sort((a, b) => b[1] - a[1]).map(([type]) => type);
   }
 
   getTopSubmolts(): string[] {
@@ -111,9 +109,7 @@ export class Memory {
       const score = p.upvotes + p.comments;
       counts.set(p.submolt, (counts.get(p.submolt) ?? 0) + score);
     }
-    return [...counts.entries()]
-      .sort((a, b) => b[1] - a[1])
-      .map(([sub]) => sub);
+    return [...counts.entries()].sort((a, b) => b[1] - a[1]).map(([sub]) => sub);
   }
 
   getRecentInteractions(count: number): Interaction[] {
@@ -185,9 +181,7 @@ export class Memory {
   /** Get posts that need engagement checking (posted >1h ago, not yet checked). */
   getPostsForEngagementCheck(): PostRecord[] {
     const oneHourAgo = Date.now() - 60 * 60 * 1000;
-    return this.state.postHistory.filter(
-      (p) => p.timestamp < oneHourAgo && !p.engagementChecked,
-    );
+    return this.state.postHistory.filter((p) => p.timestamp < oneHourAgo && !p.engagementChecked);
   }
 
   /** Mark a post as engagement-checked. */

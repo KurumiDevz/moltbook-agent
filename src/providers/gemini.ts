@@ -15,9 +15,9 @@
  */
 
 import { create, type GemaiClient } from "nimji";
-import { http } from "./http.js";
-import { saveCookies, loadCookies, loadConversation, saveConversation } from "./session-manager.js";
-import type { GenerateRequest, GenerateResponse, Provider, ProviderCapabilities, ProviderConfig } from "./provider.js";
+import { http } from "../http/index.js";
+import { saveCookies, loadCookies, loadConversation, saveConversation } from "../session-manager.js";
+import type { GenerateRequest, GenerateResponse, Provider, ProviderCapabilities, ProviderConfig } from "./types.js";
 
 export type GeminiProviderConfig = ProviderConfig & {
   /** Browser session cookies for Gemini web API */

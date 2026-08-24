@@ -6,7 +6,7 @@
  * All HTTP routed through src/http.ts — zero raw fetch() calls.
  */
 
-import { http } from "./http.js";
+import { http } from "./http/index.js";
 
 const CONTEXT7_API_BASE = "https://api.context7.com";
 

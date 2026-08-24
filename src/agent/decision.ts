@@ -23,23 +23,37 @@ export class DecisionEngine {
     if (memory.shouldPost()) {
       let score = 20;
       const r: string[] = [];
-      if (mood === "engaged") { score += 15; r.push("engaged"); }
-      if (mood === "playful") { score += 10; r.push("playful"); }
+      if (mood === "engaged") {
+        score += 15;
+        r.push("engaged");
+      }
+      if (mood === "playful") {
+        score += 10;
+        r.push("playful");
+      }
       if (trends.length > 0 && !memory.isTopicRecent(trends[0].keyword, POST_COOLDOWN_MS)) {
-        score += trends[0].heat * 2; r.push(`trending:${trends[0].keyword}`);
+        score += trends[0].heat * 2;
+        r.push(`trending:${trends[0].keyword}`);
       }
       score += traits.creativity * 10;
       // Rotate through configured submolts instead of always defaulting to "general"
       const allSubmolts = ["general", "agents", "builds", "ponderings"];
       const recentSubmolts = memory.state.postHistory.slice(-3).map((p) => p.submolt);
-      const bestSub = allSubmolts.find((s) => !recentSubmolts.includes(s)) ?? allSubmolts[memory.state.totalPosts % allSubmolts.length];
+      const bestSub =
+        allSubmolts.find((s) => !recentSubmolts.includes(s)) ??
+        allSubmolts[memory.state.totalPosts % allSubmolts.length];
       actions.push({
         action: { type: "post", topic: trends[0]?.keyword ?? "general", submolt: bestSub, postType: "discovery" },
-        score, reason: r.join(",") || "post_opportunity",
+        score,
+        reason: r.join(",") || "post_opportunity",
       });
     } else {
       if (process.env.DEBUG) console.log("   [decision] post skipped: cooldown active");
-      actions.push({ action: { type: "post", topic: "", submolt: "general", postType: "discovery" }, score: 0, reason: "rate_limited" });
+      actions.push({
+        action: { type: "post", topic: "", submolt: "general", postType: "discovery" },
+        score: 0,
+        reason: "rate_limited",
+      });
     }
 
     // --- Comment ---
@@ -48,12 +62,23 @@ export class DecisionEngine {
       const best = topPosts[Math.floor(Math.random() * Math.min(topPosts.length, 5))];
       let score = 25 + best.score * 0.3;
       const r = ["high_value_post"];
-      if (traits.agreeableness > 0.6) { score += 8; r.push("agreeable"); }
-      if (traits.snark > 0.6 && mood === "critical") { score += 10; r.push("snarky"); }
-      if (mood === "contemplative") { score += 5; r.push("contemplative"); }
+      if (traits.agreeableness > 0.6) {
+        score += 8;
+        r.push("agreeable");
+      }
+      if (traits.snark > 0.6 && mood === "critical") {
+        score += 10;
+        r.push("snarky");
+      }
+      if (mood === "contemplative") {
+        score += 5;
+        r.push("contemplative");
+      }
       actions.push({ action: { type: "comment", postId: best.post.id, content: "" }, score, reason: r.join(",") });
     } else if (process.env.DEBUG) {
-      const reason = !memory.shouldComment() ? "cooldown" : `no posts >8 (got ${scoredFeed.length} posts, top score: ${(scoredFeed[0]?.score ?? 0).toFixed(1)})`;
+      const reason = !memory.shouldComment()
+        ? "cooldown"
+        : `no posts >8 (got ${scoredFeed.length} posts, top score: ${(scoredFeed[0]?.score ?? 0).toFixed(1)})`;
       console.log(`   [decision] comment skipped: ${reason}`);
     }
 
@@ -144,7 +169,10 @@ export class DecisionEngine {
       const repeats = typeCounts.get(c.action.type) ?? 0;
       const penalty = repeats * 3;
       const adjusted = c.score - penalty;
-      if (adjusted > bestScore) { bestScore = adjusted; best = { ...c, score: adjusted }; }
+      if (adjusted > bestScore) {
+        bestScore = adjusted;
+        best = { ...c, score: adjusted };
+      }
     }
     return best;
   }

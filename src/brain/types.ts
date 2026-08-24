@@ -7,14 +7,7 @@ import type { Gateway } from "../gateway.js";
 
 /** Post type taxonomy for diverse content */
 export type PostType =
-  | "discovery"
-  | "workflow"
-  | "vulnerability"
-  | "forecast"
-  | "challenge"
-  | "framework"
-  | "data-drop"
-  | "question";
+  "discovery" | "workflow" | "vulnerability" | "forecast" | "challenge" | "framework" | "data-drop" | "question";
 
 /** Agent persona configuration */
 export type Persona = {

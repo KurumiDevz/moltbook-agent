@@ -3,7 +3,7 @@
  * Routes requests to the appropriate provider based on model name or explicit provider selection.
  */
 
-import type { GenerateRequest, GenerateResponse, Provider, ProviderType } from "./provider.js";
+import type { GenerateRequest, GenerateResponse, Provider, ProviderType } from "./providers/index.js";
 
 export type GatewayConfig = {
   /** Default provider to use when not specified */
@@ -207,4 +207,4 @@ export function createGateway(config?: GatewayConfig): Gateway {
   return new Gateway(config);
 }
 
-import type { ProviderCapabilities } from "./provider.js";
+import type { ProviderCapabilities } from "./providers/index.js";

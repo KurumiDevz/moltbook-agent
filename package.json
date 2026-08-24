@@ -8,6 +8,10 @@
   "scripts": {
     "preinstall": "node -e \"const fs=require('fs');if(fs.existsSync('dist')){fs.rmSync('dist',{recursive:true,force:true});console.log('🧹 Cleaned stale dist/')}\"",
     "build": "tsc",
+    "lint": "eslint src/",
+    "lint:fix": "eslint src/ --fix",
+    "format": "prettier --write \"src/**/*.ts\"",
+    "format:check": "prettier --check \"src/**/*.ts\"",
     "dev": "tsx --env-file=.env src/index.ts",
     "start": "node --env-file=.env dist/index.js",
     "register": "tsx --env-file=.env examples/register.ts",
@@ -35,8 +39,12 @@
   },
   "devDependencies": {
     "@types/node": "^25.6.0",
+    "eslint": "^10.9.0",
+    "eslint-config-prettier": "^10.1.8",
+    "prettier": "^3.9.6",
     "tsx": "^4.21.0",
-    "typescript": "^6.0.3"
+    "typescript": "^6.0.3",
+    "typescript-eslint": "^8.67.0"
   },
   "engines": {
     "node": ">=22.19.0"

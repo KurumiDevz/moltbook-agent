@@ -45,10 +45,8 @@ export class AutonomousAgent {
   constructor(config: AgentConfig) {
     this.moltbookAgent = config.moltbookAgent;
     this.brain = config.brain;
-    this.personalityPath =
-      config.personalityPath ?? "src/agent/data/personality.json";
-    this.memoryPath =
-      config.memoryPath ?? "src/agent/data/memory.json";
+    this.personalityPath = config.personalityPath ?? "src/agent/data/personality.json";
+    this.memoryPath = config.memoryPath ?? "src/agent/data/memory.json";
     this.submolts = config.submolts ?? ["general", "agents", "builds"];
 
     this.personality = Personality.default();
@@ -82,15 +80,11 @@ export class AutonomousAgent {
     this.cycleCount++;
     console.log(`\n── Cycle ${this.cycleCount} ──`);
 
-    const { posts, chosen } = await this.observeAndThink();
+    const { chosen } = await this.observeAndThink();
 
     // 3. ACT
     console.log("📝 Acting...");
-    const result = await this.executor.execute(
-      chosen,
-      this.personality,
-      this.memory,
-    );
+    const result = await this.executor.execute(chosen, this.personality, this.memory);
     const emoji = result.success ? "✅" : "❌";
     console.log(`   ${emoji} ${result.message}`);
 
@@ -105,7 +99,9 @@ export class AutonomousAgent {
   async dryRun(): Promise<void> {
     console.log("\n🧪 Dry run — observe + decide only");
     const { posts, chosen, trends, interesting } = await this.observeAndThink();
-    void posts; void trends; void interesting;
+    void posts;
+    void trends;
+    void interesting;
     console.log(`\n📋 Would execute: ${chosen.action.type}`);
     console.log(`   Score: ${chosen.score.toFixed(1)} — ${chosen.reason}`);
   }
@@ -120,25 +116,21 @@ export class AutonomousAgent {
     console.log("🔔 Checking notifications...");
     const notifications = await this.observer.checkNotifications();
     if (notifications.mentionCount > 0) {
-      console.log(
-        `   📩 ${notifications.mentionCount} mentions, ${notifications.replyCount} replies`,
-      );
+      console.log(`   📩 ${notifications.mentionCount} mentions, ${notifications.replyCount} replies`);
     }
 
     // 2. THINK
     console.log("🤔 Thinking...");
     const trends = this.observer.detectTrends(posts);
     const interesting = this.observer.findInterestingAgents(posts, this.memory);
-    const scored = this.decisionEngine.decide(
-      this.personality,
-      this.memory,
-      posts,
-      trends,
-      interesting,
-      { recentNotifications: notifications.recentActivity },
-    );
+    const scored = this.decisionEngine.decide(this.personality, this.memory, posts, trends, interesting, {
+      recentNotifications: notifications.recentActivity,
+    });
     if (process.env.DEBUG) {
-      console.log("   Scored actions:", scored.map((s) => `${s.action.type}:${s.score.toFixed(0)}(${s.reason})`).join(", "));
+      console.log(
+        "   Scored actions:",
+        scored.map((s) => `${s.action.type}:${s.score.toFixed(0)}(${s.reason})`).join(", "),
+      );
     }
     const recentInteractions = this.memory.getRecentInteractions(5);
     const recentActions: ScoredAction[] = recentInteractions.map((i) => ({
@@ -147,9 +139,7 @@ export class AutonomousAgent {
       reason: "",
     }));
     const chosen = this.decisionEngine.selectAction(scored, recentActions);
-    console.log(
-      `   Decision: ${chosen.action.type} (score: ${chosen.score.toFixed(1)}) — ${chosen.reason}`,
-    );
+    console.log(`   Decision: ${chosen.action.type} (score: ${chosen.score.toFixed(1)}) — ${chosen.reason}`);
 
     return { posts, trends, interesting, scored, chosen };
   }
@@ -160,9 +150,7 @@ export class AutonomousAgent {
     if (success) {
       this.personality.shiftMood("karma_gain");
     }
-    console.log(
-      `   Mood: ${this.personality.state.mood} — ${this.personality.getMoodDescription()}`,
-    );
+    console.log(`   Mood: ${this.personality.state.mood} — ${this.personality.getMoodDescription()}`);
   }
 
   /** Stop the main loop and persist state. */
@@ -170,9 +158,7 @@ export class AutonomousAgent {
     console.log("\n🛑 Stopping agent...");
     this.running = false;
     this.saveState();
-    console.log(
-      `   Final state — karma: ${this.memory.state.karma}, cycles: ${this.cycleCount}`,
-    );
+    console.log(`   Final state — karma: ${this.memory.state.karma}, cycles: ${this.cycleCount}`);
   }
 
   /** Save personality and memory to disk. */

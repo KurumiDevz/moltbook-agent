@@ -4,11 +4,12 @@
  */
 
 import type { Gateway } from "./gateway.js";
-import type { GenerateRequest } from "./provider.js";
-import { http } from "./http.js";
-import type { Post, Comment, AgentProfile, Submolt, HomeData, FollowingPost } from "./types.js";
-import { ok, err, type Result } from "./result.js";
-import { MoltbookApiError } from "./errors.js";
+import type { GenerateRequest } from "./providers/index.js";
+import { http } from "./http/index.js";
+
+import { ok, err, type Result } from "./util/index.js";
+import { MoltbookApiError } from "./util/index.js";
+import type { Post, Comment, HomeData, FollowingPost, AgentProfile, Submolt } from "./types.js";
 
 /** Moltbook API configuration */
 export type MoltbookConfig = {
