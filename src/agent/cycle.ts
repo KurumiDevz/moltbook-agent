@@ -319,8 +319,8 @@ export async function runCycle(deps: CycleDeps): Promise<CycleResult> {
       continue;
     }
 
-    // Per-post comment cap check
-    if ((decision.action === "comment" || decision.action === "reply_to_comment" || decision.action === "join_conversation") && "postId" in decision) {
+    // Per-post comment cap check — only for top-level comments, not replies/joins
+    if (decision.action === "comment" && "postId" in decision) {
       const postCommentCount = memory.repliedPostCounts.get(decision.postId) ?? 0;
       if (postCommentCount >= MAX_COMMENTS_PER_POST) {
         console.log(`   ⏭ Skipping ${decision.action} — already ${postCommentCount}x comments on post ${decision.postId}`);
