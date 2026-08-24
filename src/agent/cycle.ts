@@ -301,6 +301,9 @@ export async function runCycle(deps: CycleDeps): Promise<CycleResult> {
       .slice(-5)
       .map((t) => `${t.type}: ${t.description}`),
     notificationAgentNames: notifications.filter((n) => n.agentName).map((n) => n.agentName!),
+    recentTitles: memory.postHistory.slice(-10).map((p) => p.title ?? ""),
+    recentTopics: memory.postHistory.slice(-10).map((p) => p.type),
+    postsToday: memory.postHistory.length,
   });
 
   let finalDecision = decision;

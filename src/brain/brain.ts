@@ -22,7 +22,7 @@ import { suggestTopics, scoreTopics } from "./topics.js";
 export type { FeedPost, NotificationItem, RateLimitState, AgentDecision } from "../types.js";
 
 import type { BrainV2Config } from "./types.js";
-import { buildSkillSelectionPrompt, buildDecisionPrompt, buildContentPrompt, buildRevalidationPrompt, type BrainContext } from "./prompts.js";
+import { buildSkillSelectionPrompt, buildDecisionPrompt, buildContentPrompt, buildRevalidationPrompt, buildPostRevalidationPrompt, type BrainContext } from "./prompts.js";
 import { parseSkillSelection, parseDecision, parseContentResponse, parseRevalidation } from "./parsers.js";
 
 export class BrainV2 {
@@ -152,14 +152,6 @@ export class BrainV2 {
     skillName: string,
     context7Docs: string | null,
   ): Promise<AgentDecision> {
-    // Route to per-post conversation
-    let targetId: string | undefined;
-    if (preliminary.action === "post") {
-      targetId = `post-${new Date().toISOString().slice(0, 10)}`;
-    } else if ("postId" in preliminary) {
-      targetId = preliminary.postId;
-    }
-
     // ── Topic pipeline for post decisions ──
     // Suggest topics in a FRESH conversation, score, pick best, then generate content
     let topicDecision = preliminary;
@@ -179,6 +171,16 @@ export class BrainV2 {
           postType: best.postType,
         };
       }
+    }
+
+    // Route to per-post conversation — after topic pipeline so we use the final topic
+    let targetId: string | undefined;
+    if (topicDecision.action === "post") {
+      // Hash the topic for a unique, fresh conversation per topic
+      const topicHash = Buffer.from(topicDecision.topic).toString("base64url").slice(0, 12);
+      targetId = `post-${topicHash}`;
+    } else if ("postId" in topicDecision) {
+      targetId = topicDecision.postId;
     }
 
     const contentPrompt = buildContentPrompt(topicDecision, context, skillName, this.coreSkill, this.allSkills);
@@ -224,6 +226,9 @@ export class BrainV2 {
       commentsToday: number;
       recentActions: string[];
       notificationAgentNames: string[];
+      recentTitles?: string[];
+      recentTopics?: string[];
+      postsToday?: number;
     },
   ): Promise<{ valid: boolean; fallback?: string; reason: string }> {
     // Daily comment limit safety
@@ -246,7 +251,27 @@ export class BrainV2 {
       }
     }
 
-    // Non-reply decisions pass through (post, upvote, follow, scroll, rest are fine)
+    // AI revalidation for post decisions — catch topic repetition and spam
+    if (decision.action === "post" && context.recentTitles && context.postsToday !== undefined) {
+      const prompt = buildPostRevalidationPrompt(decision, {
+        recentTitles: context.recentTitles,
+        recentTopics: context.recentTopics ?? [],
+        postsToday: context.postsToday,
+        recentActions: context.recentActions,
+      });
+      const response = await this.gateway.generate({
+        model: this.model,
+        prompt,
+        temperature: 0.3,
+        conversationKey: "revalidate-post",
+      });
+      const parsed = parseRevalidation(response.text);
+      if (parsed && !parsed.valid) {
+        return parsed;
+      }
+    }
+
+    // Other decisions pass through
     return { valid: true, reason: "passed" };
   }
 

@@ -345,3 +345,52 @@ export function buildRevalidationPrompt(
 
   return sections.join("\n");
 }
+
+// ── Post Revalidation ─────────────────────────────────────────────
+
+/** Build prompt for post decision revalidation — checks topic quality before posting. */
+export function buildPostRevalidationPrompt(
+  decision: { topic?: string; submolt?: string; postType?: string; title?: string; body?: string; reason?: string },
+  context: {
+    recentTitles: string[];
+    recentTopics: string[];
+    postsToday: number;
+    recentActions: string[];
+  },
+): string {
+  const sections: string[] = [];
+
+  sections.push("# Post Revalidation Checkpoint");
+  sections.push("");
+  sections.push("You previously decided to make a post. Now review whether it's still a good idea.");
+  sections.push("");
+  sections.push("## Your Post");
+  sections.push(`- Topic: ${decision.topic}`);
+  sections.push(`- Submolt: ${decision.submolt}`);
+  sections.push(`- Type: ${decision.postType}`);
+  if (decision.title) sections.push(`- Title: "${decision.title}"`);
+  if (decision.body) sections.push(`- Body preview: "${decision.body.slice(0, 200)}..."`);
+  sections.push("");
+  sections.push("## Context");
+  sections.push(`- Posts today: ${context.postsToday}`);
+  sections.push(`- Recent titles: ${context.recentTitles.length > 0 ? context.recentTitles.map((t) => `"${t}"`).join(", ") : "none"}`);
+  sections.push(`- Recent topics: ${context.recentTopics.length > 0 ? context.recentTopics.join(", ") : "none"}`);
+  sections.push(`- Recent actions: ${context.recentActions.slice(-5).join(", ") || "none yet"}`);
+  sections.push("");
+  sections.push("## Rules");
+  sections.push("- The topic must be DIFFERENT from recent titles (no repeated themes)");
+  sections.push("- If the last 3 actions were all posts, reject — space out posts");
+  sections.push("- If the title is generic or sounds like spam, reject");
+  sections.push("- If the topic overlaps too much with recent posts, reject");
+  sections.push("");
+  sections.push("Respond with ONLY a JSON object:");
+  sections.push("```json");
+  sections.push('{ "valid": true, "reason": "brief explanation" }');
+  sections.push("```");
+  sections.push("OR");
+  sections.push("```json");
+  sections.push('{ "valid": false, "fallback": "scroll", "reason": "brief explanation" }');
+  sections.push("```");
+
+  return sections.join("\n");
+}
