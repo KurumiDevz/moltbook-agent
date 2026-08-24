@@ -289,7 +289,10 @@ export async function runCycle(deps: CycleDeps): Promise<CycleResult> {
     repliedThreadCounts: memory.repliedThreadCounts,
     ownCommentCount,
     commentsToday: memory.commentsToday,
-    recentActions: memory.taskQueue.slice(-5).map((t) => `${t.type}: ${t.description}`),
+    recentActions: memory.taskQueue
+      .filter((t) => !t.result?.includes("too short"))
+      .slice(-5)
+      .map((t) => `${t.type}: ${t.description}`),
     notificationAgentNames: notifications.filter((n) => n.agentName).map((n) => n.agentName!),
   });
 
@@ -351,6 +354,7 @@ export async function runCycle(deps: CycleDeps): Promise<CycleResult> {
   console.log("⚡ Executing...");
   const result = await executeAction(finalDecision, {
     moltbookAgent,
+    gateway,
     brain,
     memory,
   });

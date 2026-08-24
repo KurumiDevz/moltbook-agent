@@ -6,6 +6,7 @@
  */
 
 import type { MoltbookAgent } from "../moltbook.js";
+import type { Gateway } from "../gateway.js";
 import { BrainV2 } from "../brain/index.js";
 import { SkillValidator } from "../skills/index.js";
 import { resolve } from "node:path";
@@ -14,6 +15,62 @@ import type { MemoryState } from "./types.js";
 import { getRateLimits, isTopicRecent, parseTitleBody } from "./helpers.js";
 import { getConfig } from "../config.js";
 
+// ── Content expansion helper ───────────────────────────────────────
+
+/**
+ * When AI generates short content, expand it in a fresh conversation.
+ * Fresh conversation avoids context anchoring (same session would only
+ * produce 31→34 words because the short response is in context).
+ *
+ * Retries up to 3 times, then picks the longest result.
+ */
+async function expandContent(
+  gateway: Gateway,
+  content: string,
+  minWords: number,
+  context: string,
+): Promise<string | null> {
+  const candidates: string[] = [];
+  const maxRetries = 3;
+
+  for (let attempt = 1; attempt <= maxRetries; attempt++) {
+    const expandKey = `expand-${Date.now()}-attempt${attempt}`;
+    try {
+      const result = await gateway.generate({
+        prompt: `The following ${context} is too short (${content.split(/\s+/).length} words, minimum ${minWords}).
+
+Rewrite it to be at least ${minWords} words while keeping the same meaning, tone, and specific details. Add more depth, examples, or reasoning. Do not add filler — add substance.
+
+Original:
+${content}
+
+Write the expanded version now. Just the text, no labels.`,
+        model: "flash",
+        conversationKey: expandKey,
+        maxTokens: 2000,
+      });
+      const expanded = result.text.trim();
+      const expandedWords = expanded.split(/\s+/).length;
+      if (expandedWords >= minWords) {
+        return expanded; // First one that meets minimum — use it
+      }
+      candidates.push(expanded);
+    } catch {
+      // skip failed attempt
+    }
+  }
+
+  // All attempts under minimum — pick the longest one
+  if (candidates.length > 0) {
+    candidates.sort((a, b) => b.split(/\s+/).length - a.split(/\s+/).length);
+    const best = candidates[0];
+    const bestWords = best.split(/\s+/).length;
+    console.log(`   Best expansion attempt: ${bestWords} words (still under ${minWords} min)`);
+    return best;
+  }
+  return null;
+}
+
 // ── Main dispatcher ────────────────────────────────────────────────
 
 /** Execute a decision — dispatch to the appropriate handler. */
@@ -21,6 +78,7 @@ export async function execute(
   decision: AgentDecision,
   deps: {
     moltbookAgent: MoltbookAgent;
+    gateway: Gateway;
     brain: BrainV2;
     memory: MemoryState;
   },
@@ -53,9 +111,9 @@ export async function execute(
 
 async function executePost(
   decision: Extract<AgentDecision, { action: "post" }>,
-  deps: { moltbookAgent: MoltbookAgent; brain: BrainV2; memory: MemoryState },
+  deps: { moltbookAgent: MoltbookAgent; gateway: Gateway; brain: BrainV2; memory: MemoryState },
 ): Promise<ExecutionResult> {
-  const { moltbookAgent, brain, memory } = deps;
+  const { moltbookAgent, gateway, brain, memory } = deps;
 
   // Rate limit check
   if (!getRateLimits(memory).canPost) {
@@ -127,9 +185,9 @@ async function executePost(
 
 async function executeComment(
   decision: Extract<AgentDecision, { action: "comment" }>,
-  deps: { moltbookAgent: MoltbookAgent; brain: BrainV2; memory: MemoryState },
+  deps: { moltbookAgent: MoltbookAgent; gateway: Gateway; brain: BrainV2; memory: MemoryState },
 ): Promise<ExecutionResult> {
-  const { moltbookAgent, memory } = deps;
+  const { moltbookAgent, gateway, memory } = deps;
 
   if (!getRateLimits(memory).canComment) {
     return { success: false, action: "comment", message: "Rate limited — cannot comment yet" };
@@ -145,13 +203,21 @@ async function executeComment(
     return { success: false, action: "comment", message: `Already commented ${postCommentCount}x on post ${decision.postId} — stopping` };
   }
 
-  // Hard guard: minimum word count (AI sometimes generates one-liners)
-  const wordCount = decision.content.split(/\s+/).length;
+  // Hard guard: minimum word count — retry expansion in fresh conversation
+  let content = decision.content;
+  const wordCount = content.split(/\s+/).length;
   if (wordCount < getConfig().minCommentWords) {
-    return { success: false, action: "comment", message: `Comment too short (${wordCount} words, min ${getConfig().minCommentWords}) — skipping` };
+    console.log(`   Comment too short (${wordCount} words) — expanding in fresh session...`);
+    const expanded = await expandContent(gateway, content, getConfig().minCommentWords, "comment");
+    if (expanded) {
+      content = expanded;
+      console.log(`   Expanded to ${content.split(/\s+/).length} words`);
+    } else {
+      return { success: false, action: "comment", message: `Comment too short (${wordCount} words, min ${getConfig().minCommentWords}) — expansion failed, skipping` };
+    }
   }
 
-  await (await moltbookAgent.comment(decision.postId, decision.content)).unwrap();
+  await (await moltbookAgent.comment(decision.postId, content)).unwrap();
 
   memory.totalComments++;
   memory.commentsToday++;
@@ -164,8 +230,8 @@ async function executeComment(
   // Record stance — what position did this comment take?
   memory.stances.push({
     topic: `comment on ${decision.postId}`,
-    position: decision.content.slice(0, 100),
-    context: decision.content.slice(0, 300),
+    position: content.slice(0, 100),
+    context: content.slice(0, 300),
     source: "comment",
     sourceId: decision.postId,
     timestamp: Date.now(),
@@ -188,9 +254,9 @@ async function executeComment(
 
 async function executeReplyToComment(
   decision: Extract<AgentDecision, { action: "reply_to_comment" }>,
-  deps: { moltbookAgent: MoltbookAgent; brain: BrainV2; memory: MemoryState },
+  deps: { moltbookAgent: MoltbookAgent; gateway: Gateway; brain: BrainV2; memory: MemoryState },
 ): Promise<ExecutionResult> {
-  const { moltbookAgent, memory } = deps;
+  const { moltbookAgent, gateway, memory } = deps;
 
   if (!getRateLimits(memory).canComment) {
     return { success: false, action: "reply_to_comment", message: "Rate limited — cannot comment yet" };
@@ -211,15 +277,23 @@ async function executeReplyToComment(
     return { success: false, action: "reply_to_comment", message: `Already commented ${postCommentCount}x on post ${decision.postId} — stopping` };
   }
 
-  // Hard guard: minimum word count (AI sometimes generates one-liners)
-  const replyWordCount = decision.content.split(/\s+/).length;
+  // Hard guard: minimum word count — retry expansion in fresh conversation
+  let content = decision.content;
+  const replyWordCount = content.split(/\s+/).length;
   if (replyWordCount < getConfig().minReplyWords) {
-    return { success: false, action: "reply_to_comment", message: `Reply too short (${replyWordCount} words, min ${getConfig().minReplyWords}) — skipping` };
+    console.log(`   Reply too short (${replyWordCount} words) — expanding in fresh session...`);
+    const expanded = await expandContent(gateway, content, getConfig().minReplyWords, "reply");
+    if (expanded) {
+      content = expanded;
+      console.log(`   Expanded to ${content.split(/\s+/).length} words`);
+    } else {
+      return { success: false, action: "reply_to_comment", message: `Reply too short (${replyWordCount} words, min ${getConfig().minReplyWords}) — expansion failed, skipping` };
+    }
   }
 
   // Pass commentId as parentId for threaded reply (only if it's a real comment, not hallucinated)
   const parentId = decision.commentId?.match(/^[0-9a-f-]{36}$/) ? decision.commentId : undefined;
-  const replyResult = await moltbookAgent.comment(decision.postId, decision.content, parentId);
+  const replyResult = await moltbookAgent.comment(decision.postId, content, parentId);
   if (!replyResult.ok) {
     // Track as replied so we never retry a deleted/gone comment
     if (decision.commentId) memory.repliedCommentIds.add(decision.commentId);
@@ -233,8 +307,8 @@ async function executeReplyToComment(
   // Record stance — what position did this reply take?
   memory.stances.push({
     topic: `reply to ${decision.commentId}`,
-    position: decision.content.slice(0, 100),
-    context: decision.content.slice(0, 300),
+    position: content.slice(0, 100),
+    context: content.slice(0, 300),
     source: "reply",
     sourceId: decision.commentId,
     timestamp: Date.now(),
@@ -269,7 +343,7 @@ async function executeReplyToComment(
 
 async function executeUpvote(
   decision: Extract<AgentDecision, { action: "upvote" }>,
-  deps: { moltbookAgent: MoltbookAgent; brain: BrainV2; memory: MemoryState },
+  deps: { moltbookAgent: MoltbookAgent; gateway: Gateway; brain: BrainV2; memory: MemoryState },
 ): Promise<ExecutionResult> {
   await (await deps.moltbookAgent.vote(decision.postId, "up")).unwrap();
   deps.memory.totalUpvotes++;
@@ -280,7 +354,7 @@ async function executeUpvote(
 
 async function executeDownvote(
   decision: Extract<AgentDecision, { action: "downvote" }>,
-  deps: { moltbookAgent: MoltbookAgent; brain: BrainV2; memory: MemoryState },
+  deps: { moltbookAgent: MoltbookAgent; gateway: Gateway; brain: BrainV2; memory: MemoryState },
 ): Promise<ExecutionResult> {
   await (await deps.moltbookAgent.vote(decision.postId, "down")).unwrap();
   return { success: true, action: "downvote", message: `Downvoted ${decision.postId}` };
@@ -290,7 +364,7 @@ async function executeDownvote(
 
 async function executeFollow(
   decision: Extract<AgentDecision, { action: "follow" }>,
-  deps: { moltbookAgent: MoltbookAgent; brain: BrainV2; memory: MemoryState },
+  deps: { moltbookAgent: MoltbookAgent; gateway: Gateway; brain: BrainV2; memory: MemoryState },
 ): Promise<ExecutionResult> {
   await (await deps.moltbookAgent.follow(decision.agentName)).unwrap();
   return { success: true, action: "follow", message: `Followed ${decision.agentName}` };
