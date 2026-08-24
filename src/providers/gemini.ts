@@ -195,19 +195,49 @@ export class GeminiProvider implements Provider {
   /** Full session refresh: rotate cookies + fSid + atToken + recreate client */
   private async refreshSession(): Promise<void> {
     if (!this.config) return;
-    const refresh = await refreshSession({
-      cookies: this.effectiveCookies,
-      userAgent: this.config.options?.userAgent as string,
-    });
+
+    // Retry up to 3 times with exponential backoff
+    const MAX_RETRIES = 3;
+    let refresh: { cookies: string; fSid: string; atToken: string } | null = null;
+
+    for (let attempt = 1; attempt <= MAX_RETRIES; attempt++) {
+      refresh = await refreshSession({
+        cookies: this.effectiveCookies,
+        userAgent: this.config.options?.userAgent as string,
+      });
+
+      if (refresh) break;
+
+      if (attempt < MAX_RETRIES) {
+        const delayMs = attempt * 2000; // 2s, 4s
+        console.log(`[gemini-provider] Refresh attempt ${attempt}/${MAX_RETRIES} failed, retrying in ${delayMs}ms...`);
+        await new Promise((r) => setTimeout(r, delayMs));
+      }
+    }
+
     if (!refresh) {
-      console.log("[gemini-provider] Session refresh failed — cookies may be expired");
+      console.log(`[gemini-provider] Session refresh FAILED after ${MAX_RETRIES} attempts — cookies may be expired`);
       return;
     }
 
-    // Update auth state — preserve last-known-good atToken/fSid if refresh returned null
+    // Staleness detection: check if rotated cookies actually changed
+    const cookiesChanged = refresh.cookies !== this.effectiveCookies;
+    const fSidChanged = refresh.fSid && refresh.fSid !== this.effectiveFSid;
+    const atTokenChanged = refresh.atToken && refresh.atToken !== this.effectiveAtToken;
+
+    // Update auth state — preserve last-known-good atToken/fSid if refresh returned empty
     this.effectiveCookies = refresh.cookies;
     this.effectiveFSid = refresh.fSid || this.effectiveFSid;
     this.effectiveAtToken = refresh.atToken || this.effectiveAtToken;
+
+    // Null-guard: if both old and new are empty, log warning
+    if (!this.effectiveAtToken) {
+      console.log("[gemini-provider] WARNING: atToken is empty after refresh — requests may fail");
+    }
+    if (!this.effectiveFSid) {
+      console.log("[gemini-provider] WARNING: fSid is empty after refresh — requests may fail");
+    }
+
     saveCookies({ cookies: refresh.cookies });
 
     // Recreate nimji client with fresh tokens
@@ -231,7 +261,12 @@ export class GeminiProvider implements Provider {
       });
     }
 
-    console.log("[gemini-provider] Session refreshed (cookies + fSid + atToken)");
+    // Detailed rotation logging
+    if (cookiesChanged || fSidChanged || atTokenChanged) {
+      console.log(`[gemini-provider] Session refreshed — cookies:${cookiesChanged ? "rotated" : "same"} fSid:${fSidChanged ? "rotated" : "same"} atToken:${atTokenChanged ? "rotated" : "same"}`);
+    } else {
+      console.log("[gemini-provider] Session refreshed — no rotation detected (cookies may be stale)");
+    }
   }
 
   async generate(request: GenerateRequest): Promise<GenerateResponse> {
