@@ -759,6 +759,12 @@ export class AgentV2 {
       return { success: false, action: "comment", message: `Already commented ${postCommentCount}x on post ${decision.postId} — stopping` };
     }
 
+    // Hard guard: minimum word count (AI sometimes generates one-liners)
+    const wordCount = decision.content.split(/\s+/).length;
+    if (wordCount < 40) {
+      return { success: false, action: "comment", message: `Comment too short (${wordCount} words, min 40) — skipping` };
+    }
+
     await (await this.moltbookAgent.comment(decision.postId, decision.content)).unwrap();
 
     this.memory.totalComments++;
@@ -812,6 +818,12 @@ export class AgentV2 {
     const postCommentCount = this.memory.repliedPostCounts.get(decision.postId) ?? 0;
     if (postCommentCount >= 2) {
       return { success: false, action: "reply_to_comment", message: `Already commented ${postCommentCount}x on post ${decision.postId} — stopping` };
+    }
+
+    // Hard guard: minimum word count (AI sometimes generates one-liners)
+    const replyWordCount = decision.content.split(/\s+/).length;
+    if (replyWordCount < 40) {
+      return { success: false, action: "reply_to_comment", message: `Reply too short (${replyWordCount} words, min 40) — skipping` };
     }
 
     // Pass commentId as parentId for threaded reply (only if it's a real comment, not hallucinated)
