@@ -358,6 +358,19 @@ export class AgentV2 {
         seenIds.add(p.id);
       }
     }
+
+    // Remove posts where we've hit the comment cap (prevents AI from seeing them every cycle)
+    const feedBeforeCapped = rawFeed.length;
+    for (let i = rawFeed.length - 1; i >= 0; i--) {
+      if ((this.memory.repliedPostCounts.get(rawFeed[i].id) ?? 0) >= MAX_COMMENTS_PER_POST) {
+        rawFeed.splice(i, 1);
+      }
+    }
+    const cappedRemoved = feedBeforeCapped - rawFeed.length;
+    if (cappedRemoved > 0) {
+      console.log(`   Removed ${cappedRemoved} posts at comment cap (${MAX_COMMENTS_PER_POST}x max)`);
+    }
+
     console.log(`   Home: ${home.activity.length} posts with activity | ${home.unreadCount} unread`);
     console.log(`   Feed: ${rawFeed.length} posts (${relevantPosts.length} from semantic search)`);
 
