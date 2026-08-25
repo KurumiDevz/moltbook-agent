@@ -121,3 +121,42 @@ if (existsSync(parserPath)) {
     console.warn("[nimji-patch] failed to patch parser.js:", err.message);
   }
 }
+
+// ─── Patch nimji auth: || → ?? for fSid/atToken rotation ───
+// nimji uses || (truthy check) which keeps stale values when our refresh
+// provides fresh tokens. ?? (nullish coalescing) ensures fresh values win.
+const authFiles = [
+  path.join("node_modules", "nimji", "dist", "cli.js"),
+  path.join("node_modules", "nimji", "dist", "runtime", "keepalive.js"),
+];
+const authPatches = [
+  {
+    find: ".auth.fSid || refresh.fSid",
+    replace: ".auth.fSid ?? refresh.fSid",
+    label: "fSid: || → ??",
+  },
+  {
+    find: ".auth.atToken || refresh.atToken",
+    replace: ".auth.atToken ?? refresh.atToken",
+    label: "atToken: || → ??",
+  },
+];
+for (const filePath of authFiles) {
+  if (!existsSync(filePath)) continue;
+  try {
+    let src = readFileSync(filePath, "utf-8");
+    let patched = false;
+    for (const { find, replace, label } of authPatches) {
+      if (src.includes(find)) {
+        src = src.replaceAll(find, replace);
+        console.log(`[nimji-patch] ${path.basename(filePath)}: ${label}`);
+        patched = true;
+      }
+    }
+    if (patched) {
+      writeFileSync(filePath, src, "utf-8");
+    }
+  } catch (err) {
+    console.warn(`[nimji-patch] failed to patch ${path.basename(filePath)}:`, err.message);
+  }
+}

@@ -26,6 +26,8 @@ export type GeminiProviderConfig = ProviderConfig & {
   readonly model?: string;
   /** Conversation key for isolation (default: "main") */
   readonly conversationKey?: string;
+  /** Use deep browser session refresh via bard-utils (default: false) */
+  readonly deepRefresh?: boolean;
 };
 
 // ─── Session refresh via bard-utils ───
@@ -100,6 +102,7 @@ export class GeminiProvider implements Provider {
   private effectiveCookies: string = "";
   private effectiveFSid: string = "";
   private effectiveAtToken: string = "";
+  private deepRefresh: boolean = false;
 
   constructor() {
     this.defaultModel = "flash";
@@ -109,6 +112,7 @@ export class GeminiProvider implements Provider {
   async initialize(config: GeminiProviderConfig): Promise<void> {
     this.config = config;
     this.conversationKey = config.conversationKey ?? "main";
+    this.deepRefresh = (config.options?.deepRefresh as boolean) ?? false;
 
     // Load cookies: prefer saved (fresh) from gemini-session.json, fall back to .env
     const savedCookies = loadCookies();
@@ -126,6 +130,7 @@ export class GeminiProvider implements Provider {
     const refresh = await refreshSession({
       cookies,
       userAgent: config.options?.userAgent as string,
+      deep: this.deepRefresh,
     });
 
     if (refresh) {
@@ -207,6 +212,7 @@ export class GeminiProvider implements Provider {
       refresh = await refreshSession({
         cookies: this.effectiveCookies,
         userAgent: this.config.options?.userAgent as string,
+        deep: this.deepRefresh,
       });
 
       if (refresh) break;

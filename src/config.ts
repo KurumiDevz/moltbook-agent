@@ -56,6 +56,8 @@ export type AgentConfig = {
   postConvoCleanupMs: number;
   /** Topic dedup window — how long before same topic can be repeated (ms) */
   topicDedupWindowMs: number;
+  /** Use deep browser session refresh via bard-utils (default: false) */
+  deepRefresh: boolean;
 };
 
 export type BlockedPosts = {
@@ -87,6 +89,7 @@ const AGENT_DEFAULTS: AgentConfig = {
   postConvoRotationMs: 24 * 60 * 60 * 1000,
   postConvoCleanupMs: 48 * 60 * 60 * 1000,
   topicDedupWindowMs: 24 * 60 * 60 * 1000,
+  deepRefresh: false,
 };
 
 const BLOCKED_DEFAULTS: BlockedPosts = {

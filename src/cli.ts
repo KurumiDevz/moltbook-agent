@@ -5,10 +5,12 @@
  * Lives at src/cli.ts (outside src/agent/) to avoid V1 module resolution issues.
  */
 
+import "dotenv/config";
 import { Gateway } from "./gateway.js";
 import { GeminiProvider } from "./providers/index.js";
 import { createMoltbookAgent } from "./moltbook.js";
 import { AgentV2 } from "./agent/index.js";
+import { getConfig } from "./config.js";
 
 function parseArgs(argv: string[]) {
   const args: {
@@ -58,7 +60,8 @@ async function main() {
   const gateway = new Gateway();
   const gemini = new GeminiProvider();
   gateway.registerProvider(gemini);
-  await gateway.initializeProvider("gemini", { type: "gemini", options: { cookies } });
+  const config = getConfig();
+  await gateway.initializeProvider("gemini", { type: "gemini", options: { cookies, deepRefresh: process.env.DEEP_REFRESH === "true" || config.deepRefresh } });
 
   // Create Moltbook agent
   const moltbookAgent = createMoltbookAgent(gateway, { apiKey });
