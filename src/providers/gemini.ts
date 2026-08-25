@@ -33,6 +33,7 @@ export type GeminiProviderConfig = ProviderConfig & {
 async function refreshSession(opts: {
   readonly cookies: string;
   readonly userAgent?: string;
+  readonly deep?: boolean;
 }): Promise<{ cookies: string; fSid: string; atToken: string } | null> {
   const baseUrl = "https://bard-utils.onrender.com";
   const ua = "nimji/0.2.1 (github.com/Mra1k3r0/nimji)";
@@ -58,6 +59,7 @@ async function refreshSession(opts: {
       body: {
         cookies: opts.cookies,
         ...(opts.userAgent ? { userAgent: opts.userAgent } : {}),
+        ...(opts.deep ? { deep: true } : {}),
       },
     });
 
