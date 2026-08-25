@@ -36,6 +36,7 @@ async function refreshSession(opts: {
   readonly cookies: string;
   readonly userAgent?: string;
   readonly deep?: boolean;
+  readonly force?: boolean;
 }): Promise<{ cookies: string; fSid: string; atToken: string } | null> {
   const baseUrl = "https://bard-utils.onrender.com";
   const ua = "nimji/0.2.1 (github.com/Mra1k3r0/nimji)";
@@ -62,6 +63,7 @@ async function refreshSession(opts: {
         cookies: opts.cookies,
         ...(opts.userAgent ? { userAgent: opts.userAgent } : {}),
         ...(opts.deep ? { deep: true } : {}),
+        ...(opts.force ? { force: true } : {}),
       },
     });
 
@@ -200,8 +202,16 @@ export class GeminiProvider implements Provider {
     }
   }
 
+  /** Force a session refresh — bypasses cache and adaptive skip in bard-utils */
+  async forceRefresh(): Promise<boolean> {
+    if (!this.config) return false;
+    console.log("[gemini-provider] Forcing session refresh...");
+    await this.refreshSession(true);
+    return this.client !== null;
+  }
+
   /** Full session refresh: rotate cookies + fSid + atToken + recreate client */
-  private async refreshSession(): Promise<void> {
+  private async refreshSession(force = false): Promise<void> {
     if (!this.config) return;
 
     // Retry up to 3 times with exponential backoff
@@ -213,6 +223,7 @@ export class GeminiProvider implements Provider {
         cookies: this.effectiveCookies,
         userAgent: this.config.options?.userAgent as string,
         deep: this.deepRefresh,
+        force,
       });
 
       if (refresh) break;
@@ -278,15 +289,13 @@ export class GeminiProvider implements Provider {
 
     // Detailed rotation logging
     if (cookiesChanged || fSidChanged || atTokenChanged) {
-      console.log(`[gemini-provider] Session refreshed — cookies:${cookiesChanged ? "rotated" : "same"} fSid:${fSidChanged ? "rotated" : "same"} atToken:${atTokenChanged ? "rotated" : "same"}`);
+      console.log(`[gemini-provider] Session refreshed — cookies:${cookiesChanged ? "rotated" : "same"} fSid:${fSidChanged ? "rotated" : "same"} atToken:${atTokenChanged ? "rotated" : "same"}${force ? " (forced)" : ""}`);
     } else {
-      console.log("[gemini-provider] Session refreshed — no rotation detected (cookies may be stale)");
+      console.log(`[gemini-provider] Session refreshed — no rotation detected (cookies may be stale)${force ? " (forced)" : ""}`);
     }
 
-    // Probe: send a lightweight request to verify the new session works.
-    // Google's backend has multiple servers — rotated cookies may take 1-3s
-    // to propagate. Without this probe, the first real request can hit a
-    // server that hasn't synced yet, causing partial streams or timeouts.
+    // Smart probe: verify new session works. If fails → force refresh.
+    // Google has multiple servers — rotated cookies may take 1-3s to propagate.
     if (cookiesChanged || fSidChanged) {
       try {
         const probeClient = create({
@@ -299,18 +308,12 @@ export class GeminiProvider implements Provider {
         if (probe.isOk()) {
           console.log("[gemini-provider] Session probe OK — new cookies accepted");
         } else {
-          console.log("[gemini-provider] Session probe failed — cookies may not have propagated yet");
-          // Wait and retry once
-          await new Promise((r) => setTimeout(r, 3000));
-          const probe2 = await probeClient.generate({ prompt: "hi" });
-          if (probe2.isOk()) {
-            console.log("[gemini-provider] Session probe OK after retry");
-          } else {
-            console.log("[gemini-provider] Session probe failed after retry — session may be degraded");
-          }
+          console.log("[gemini-provider] Session probe failed — forcing refresh...");
+          await this.refreshSession(true);
         }
       } catch {
-        console.log("[gemini-provider] Session probe threw — continuing anyway");
+        console.log("[gemini-provider] Session probe threw — forcing refresh...");
+        await this.refreshSession(true);
       }
     }
   }

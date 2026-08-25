@@ -168,6 +168,22 @@ export async function runCycle(deps: CycleDeps): Promise<CycleResult> {
 
   console.log(`\n── Cycle ${cycleCount} ──`);
 
+  // Health check: verify session is alive before expensive operations
+  try {
+    const healthy = await gateway.healthCheck();
+    if (!healthy.gemini) {
+      console.log("⚠️  Session unhealthy — forcing refresh...");
+      const refreshed = await gateway.forceRefresh("gemini");
+      if (refreshed) {
+        console.log("✅ Session refreshed successfully");
+      } else {
+        console.log("❌ Session refresh failed — proceeding anyway");
+      }
+    }
+  } catch {
+    // Health check failure is non-fatal — proceed with cycle
+  }
+
   // Rotate stale conversations to prevent hallucination loops
   const convoKeys = ["revalidate", "sub-score"];
   for (const key of convoKeys) {

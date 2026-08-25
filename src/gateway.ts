@@ -95,7 +95,7 @@ export class Gateway {
   }
 
   /**
-   * Generate using a specific provider with timeout.
+   * Generate using a specific provider with timeout and refresh-on-failure.
    */
   private async generateWithProvider(type: ProviderType, request: GenerateRequest): Promise<GenerateResponse> {
     const provider = this.providers.get(type);
@@ -109,12 +109,35 @@ export class Gateway {
 
     const timeout = this.config.timeoutMs ?? 60_000;
 
-    return Promise.race([
-      provider.generate(request),
-      new Promise<never>((_, reject) =>
-        setTimeout(() => reject(new Error(`Provider "${type}" timeout after ${timeout}ms`)), timeout),
-      ),
-    ]);
+    try {
+      return await Promise.race([
+        provider.generate(request),
+        new Promise<never>((_, reject) =>
+          setTimeout(() => reject(new Error(`Provider "${type}" timeout after ${timeout}ms`)), timeout),
+        ),
+      ]);
+    } catch (err: any) {
+      // On timeout or session error, force refresh and retry once
+      const isRetryable =
+        err?.message?.includes("timeout") ||
+        err?.message?.includes("Session expired") ||
+        err?.message?.includes("login page");
+
+      if (isRetryable && "forceRefresh" in provider) {
+        console.log(`[gateway] ${type} failed (${err.message?.slice(0, 50)}) — forcing refresh and retrying...`);
+        await (provider as any).forceRefresh();
+
+        // Retry once with fresh session
+        return Promise.race([
+          provider.generate(request),
+          new Promise<never>((_, reject) =>
+            setTimeout(() => reject(new Error(`Provider "${type}" timeout after retry ${timeout}ms`)), timeout),
+          ),
+        ]);
+      }
+
+      throw err;
+    }
   }
 
   /**
@@ -158,6 +181,15 @@ export class Gateway {
    */
   getProviderCapabilities(type: ProviderType): ProviderCapabilities | undefined {
     return this.providers.get(type)?.getCapabilities();
+  }
+
+  /**
+   * Force refresh a specific provider's session (e.g., after cookie death).
+   */
+  async forceRefresh(type: ProviderType): Promise<boolean> {
+    const provider = this.providers.get(type);
+    if (!provider || !("forceRefresh" in provider)) return false;
+    return (provider as any).forceRefresh();
   }
 
   /**
