@@ -55,6 +55,13 @@ Write the expanded version now. Just the text, no labels.`,
       const expandedWords = expanded.split(/\s+/).length;
       // Cleanup throwaway session file
       try { deleteConversation(expandKey); } catch { /* ignore */ }
+      // Discard partial/empty responses (<5 words is almost certainly a bad stream)
+      if (expandedWords < 5) {
+        if (attempt < maxRetries) {
+          await new Promise((r) => setTimeout(r, 1000)); // backoff before retry
+        }
+        continue;
+      }
       if (expandedWords >= minWords) {
         return expanded; // First one that meets minimum — use it
       }
@@ -62,6 +69,9 @@ Write the expanded version now. Just the text, no labels.`,
     } catch {
       // Cleanup on failure too
       try { deleteConversation(expandKey); } catch { /* ignore */ }
+      if (attempt < maxRetries) {
+        await new Promise((r) => setTimeout(r, 1000));
+      }
     }
   }
 

@@ -282,6 +282,37 @@ export class GeminiProvider implements Provider {
     } else {
       console.log("[gemini-provider] Session refreshed — no rotation detected (cookies may be stale)");
     }
+
+    // Probe: send a lightweight request to verify the new session works.
+    // Google's backend has multiple servers — rotated cookies may take 1-3s
+    // to propagate. Without this probe, the first real request can hit a
+    // server that hasn't synced yet, causing partial streams or timeouts.
+    if (cookiesChanged || fSidChanged) {
+      try {
+        const probeClient = create({
+          COOKIES: refresh.cookies,
+          MODEL: this.defaultModel,
+          AT_TOKEN: this.effectiveAtToken,
+          F_SID: this.effectiveFSid,
+        });
+        const probe = await probeClient.generate({ prompt: "hi" });
+        if (probe.isOk()) {
+          console.log("[gemini-provider] Session probe OK — new cookies accepted");
+        } else {
+          console.log("[gemini-provider] Session probe failed — cookies may not have propagated yet");
+          // Wait and retry once
+          await new Promise((r) => setTimeout(r, 3000));
+          const probe2 = await probeClient.generate({ prompt: "hi" });
+          if (probe2.isOk()) {
+            console.log("[gemini-provider] Session probe OK after retry");
+          } else {
+            console.log("[gemini-provider] Session probe failed after retry — session may be degraded");
+          }
+        }
+      } catch {
+        console.log("[gemini-provider] Session probe threw — continuing anyway");
+      }
+    }
   }
 
   async generate(request: GenerateRequest): Promise<GenerateResponse> {
