@@ -58,6 +58,8 @@ export type AgentConfig = {
   topicDedupWindowMs: number;
   /** Use deep browser session refresh via bard-utils (default: false) */
   deepRefresh: boolean;
+  /** Force refresh bypassing bard-utils cache/skip (default: false) */
+  forceRefresh: boolean;
 };
 
 export type BlockedPosts = {
@@ -90,6 +92,7 @@ const AGENT_DEFAULTS: AgentConfig = {
   postConvoCleanupMs: 48 * 60 * 60 * 1000,
   topicDedupWindowMs: 24 * 60 * 60 * 1000,
   deepRefresh: false,
+  forceRefresh: false,
 };
 
 const BLOCKED_DEFAULTS: BlockedPosts = {

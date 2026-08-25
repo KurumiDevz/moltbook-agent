@@ -169,15 +169,20 @@ export async function runCycle(deps: CycleDeps): Promise<CycleResult> {
   console.log(`\n── Cycle ${cycleCount} ──`);
 
   // Health check: verify session is alive before expensive operations
+  // Only force refresh if forceRefresh is enabled in config
   try {
     const healthy = await gateway.healthCheck();
     if (!healthy.gemini) {
-      console.log("⚠️  Session unhealthy — forcing refresh...");
-      const refreshed = await gateway.forceRefresh("gemini");
-      if (refreshed) {
-        console.log("✅ Session refreshed successfully");
+      if (getConfig().forceRefresh) {
+        console.log("⚠️  Session unhealthy — forcing refresh...");
+        const refreshed = await gateway.forceRefresh("gemini");
+        if (refreshed) {
+          console.log("✅ Session refreshed successfully");
+        } else {
+          console.log("❌ Session refresh failed — proceeding anyway");
+        }
       } else {
-        console.log("❌ Session refresh failed — proceeding anyway");
+        console.log("⚠️  Session unhealthy — enable FORCE_REFRESH to auto-recover");
       }
     }
   } catch {

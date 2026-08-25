@@ -61,7 +61,11 @@ async function main() {
   const gemini = new GeminiProvider();
   gateway.registerProvider(gemini);
   const config = getConfig();
-  await gateway.initializeProvider("gemini", { type: "gemini", options: { cookies, deepRefresh: process.env.DEEP_REFRESH === "true" || config.deepRefresh } });
+  await gateway.initializeProvider("gemini", { type: "gemini", options: {
+    cookies,
+    deepRefresh: process.env.DEEP_REFRESH === "true" || config.deepRefresh,
+    forceRefresh: process.env.FORCE_REFRESH === "true" || config.forceRefresh,
+  } });
 
   // Create Moltbook agent
   const moltbookAgent = createMoltbookAgent(gateway, { apiKey });

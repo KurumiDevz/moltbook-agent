@@ -117,23 +117,31 @@ export class Gateway {
         ),
       ]);
     } catch (err: any) {
-      // On timeout or session error, force refresh and retry once
+      // On timeout or session error, force refresh and retry once (if enabled)
       const isRetryable =
         err?.message?.includes("timeout") ||
         err?.message?.includes("Session expired") ||
         err?.message?.includes("login page");
 
       if (isRetryable && "forceRefresh" in provider) {
-        console.log(`[gateway] ${type} failed (${err.message?.slice(0, 50)}) — forcing refresh and retrying...`);
-        await (provider as any).forceRefresh();
+        // Check if forceRefresh is enabled via provider config
+        const providerConfig = (provider as any).config?.options;
+        const forceEnabled = providerConfig?.forceRefresh ?? false;
 
-        // Retry once with fresh session
-        return Promise.race([
-          provider.generate(request),
-          new Promise<never>((_, reject) =>
-            setTimeout(() => reject(new Error(`Provider "${type}" timeout after retry ${timeout}ms`)), timeout),
-          ),
-        ]);
+        if (forceEnabled) {
+          console.log(`[gateway] ${type} failed (${err.message?.slice(0, 50)}) — forcing refresh and retrying...`);
+          await (provider as any).forceSessionRefresh();
+
+          // Retry once with fresh session
+          return Promise.race([
+            provider.generate(request),
+            new Promise<never>((_, reject) =>
+              setTimeout(() => reject(new Error(`Provider "${type}" timeout after retry ${timeout}ms`)), timeout),
+            ),
+          ]);
+        } else {
+          console.log(`[gateway] ${type} failed (${err.message?.slice(0, 50)}) — enable FORCE_REFRESH to auto-recover`);
+        }
       }
 
       throw err;
@@ -188,8 +196,8 @@ export class Gateway {
    */
   async forceRefresh(type: ProviderType): Promise<boolean> {
     const provider = this.providers.get(type);
-    if (!provider || !("forceRefresh" in provider)) return false;
-    return (provider as any).forceRefresh();
+    if (!provider || !("forceSessionRefresh" in provider)) return false;
+    return (provider as any).forceSessionRefresh();
   }
 
   /**

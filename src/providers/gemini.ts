@@ -105,6 +105,7 @@ export class GeminiProvider implements Provider {
   private effectiveFSid: string = "";
   private effectiveAtToken: string = "";
   private deepRefresh: boolean = false;
+  private forceRefresh: boolean = false;
 
   constructor() {
     this.defaultModel = "flash";
@@ -115,6 +116,7 @@ export class GeminiProvider implements Provider {
     this.config = config;
     this.conversationKey = config.conversationKey ?? "main";
     this.deepRefresh = (config.options?.deepRefresh as boolean) ?? false;
+    this.forceRefresh = (config.options?.forceRefresh as boolean) ?? false;
 
     // Load cookies: prefer saved (fresh) from gemini-session.json, fall back to .env
     const savedCookies = loadCookies();
@@ -203,7 +205,7 @@ export class GeminiProvider implements Provider {
   }
 
   /** Force a session refresh — bypasses cache and adaptive skip in bard-utils */
-  async forceRefresh(): Promise<boolean> {
+  async forceSessionRefresh(): Promise<boolean> {
     if (!this.config) return false;
     console.log("[gemini-provider] Forcing session refresh...");
     await this.refreshSession(true);
@@ -214,6 +216,9 @@ export class GeminiProvider implements Provider {
   private async refreshSession(force = false): Promise<void> {
     if (!this.config) return;
 
+    // Use force if explicitly passed OR if forceRefresh is enabled in config
+    const useForce = force || this.forceRefresh;
+
     // Retry up to 3 times with exponential backoff
     const MAX_RETRIES = 3;
     let refresh: { cookies: string; fSid: string; atToken: string } | null = null;
@@ -223,7 +228,7 @@ export class GeminiProvider implements Provider {
         cookies: this.effectiveCookies,
         userAgent: this.config.options?.userAgent as string,
         deep: this.deepRefresh,
-        force,
+        force: useForce,
       });
 
       if (refresh) break;
@@ -289,12 +294,12 @@ export class GeminiProvider implements Provider {
 
     // Detailed rotation logging
     if (cookiesChanged || fSidChanged || atTokenChanged) {
-      console.log(`[gemini-provider] Session refreshed — cookies:${cookiesChanged ? "rotated" : "same"} fSid:${fSidChanged ? "rotated" : "same"} atToken:${atTokenChanged ? "rotated" : "same"}${force ? " (forced)" : ""}`);
+      console.log(`[gemini-provider] Session refreshed — cookies:${cookiesChanged ? "rotated" : "same"} fSid:${fSidChanged ? "rotated" : "same"} atToken:${atTokenChanged ? "rotated" : "same"}${useForce ? " (forced)" : ""}`);
     } else {
-      console.log(`[gemini-provider] Session refreshed — no rotation detected (cookies may be stale)${force ? " (forced)" : ""}`);
+      console.log(`[gemini-provider] Session refreshed — no rotation detected (cookies may be stale)${useForce ? " (forced)" : ""}`);
     }
 
-    // Smart probe: verify new session works. If fails → force refresh.
+    // Smart probe: verify new session works. Handles propagation delay + detects logged-out.
     // Google has multiple servers — rotated cookies may take 1-3s to propagate.
     if (cookiesChanged || fSidChanged) {
       try {
@@ -308,12 +313,25 @@ export class GeminiProvider implements Provider {
         if (probe.isOk()) {
           console.log("[gemini-provider] Session probe OK — new cookies accepted");
         } else {
-          console.log("[gemini-provider] Session probe failed — forcing refresh...");
-          await this.refreshSession(true);
+          // Wait 3s for propagation, retry once
+          await new Promise((r) => setTimeout(r, 3000));
+          const probe2 = await probeClient.generate({ prompt: "hi" });
+          if (probe2.isOk()) {
+            console.log("[gemini-provider] Session probe OK after retry");
+          } else if (this.forceRefresh) {
+            console.log("[gemini-provider] Session probe failed — forcing refresh...");
+            await this.refreshSession(true);
+          } else {
+            console.log("[gemini-provider] Session probe failed — session may be degraded (enable FORCE_REFRESH to auto-recover)");
+          }
         }
       } catch {
-        console.log("[gemini-provider] Session probe threw — forcing refresh...");
-        await this.refreshSession(true);
+        if (this.forceRefresh) {
+          console.log("[gemini-provider] Session probe threw — forcing refresh...");
+          await this.refreshSession(true);
+        } else {
+          console.log("[gemini-provider] Session probe threw — session may be degraded (enable FORCE_REFRESH to auto-recover)");
+        }
       }
     }
   }
