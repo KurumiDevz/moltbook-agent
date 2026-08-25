@@ -37,6 +37,7 @@ export class AgentV2 {
   private memory: MemoryState;
   private summaryInterval: number;
   private lastSummary: ActivitySummary | null = null;
+  private consecutiveErrors = 0;
 
   constructor(config: AgentV2Config) {
     this.moltbookAgent = config.moltbookAgent;
@@ -128,13 +129,20 @@ export class AgentV2 {
         });
         this.cycleCount = cycleResult.cycleCount;
         this.lastSummary = cycleResult.lastSummary;
+        this.consecutiveErrors = 0;
       } catch (err) {
+        this.consecutiveErrors++;
         const msg = err instanceof Error ? err.message : String(err);
         if (msg.includes("Session expired") || msg.includes("login page")) {
           console.error("🔴 Session expired — Gemini returned a login page. Cookies may need re-export.");
         } else {
-          console.error("💥 Cycle error:", err);
+          console.error(`💥 Cycle error (consecutive: ${this.consecutiveErrors}):`, err);
         }
+        // Escalating backoff: 30s, 60s, 120s, max 5min
+        const backoffMs = Math.min(30_000 * Math.pow(2, this.consecutiveErrors - 1), 300_000);
+        console.log(`   ⏳ Backing off ${Math.round(backoffMs / 1000)}s before retry...`);
+        await sleep(backoffMs);
+        continue; // skip normal sleep below
       }
       const [min, max] = getConfig().cycleSleepMs;
       await sleep(min + Math.random() * (max - min));

@@ -139,8 +139,7 @@ export class GeminiProvider implements Provider {
     this.effectiveAtToken = refresh?.atToken ?? "";
 
     // Create nimji client with refreshed cookies + auth tokens
-    // We own rotation — disable nimji's internal rotate timer via env
-    process.env.KEEPALIVE_ROTATE_ENABLED = "0";
+    // Nimji's internal rotation is enabled as safety net alongside our5-min refresh
     this.client = create({
       COOKIES: cookies,
       MODEL: this.defaultModel,
@@ -248,8 +247,7 @@ export class GeminiProvider implements Provider {
     }
 
     // Recreate nimji client with fresh tokens
-    // We own rotation — disable nimji's internal rotate timer via env
-    process.env.KEEPALIVE_ROTATE_ENABLED = "0";
+    // Nimji's internal rotation is enabled as safety net alongside our5-min refresh
     this.client = create({
       COOKIES: refresh.cookies,
       MODEL: this.defaultModel,
