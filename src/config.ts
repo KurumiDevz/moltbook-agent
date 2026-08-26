@@ -60,6 +60,8 @@ export type AgentConfig = {
   deepRefresh: boolean;
   /** Force refresh bypassing bard-utils cache/skip (default: false) */
   forceRefresh: boolean;
+  /** Max comments per day (default: 50) */
+  maxCommentsPerDay: number;
 };
 
 export type BlockedPosts = {
@@ -93,6 +95,7 @@ const AGENT_DEFAULTS: AgentConfig = {
   topicDedupWindowMs: 24 * 60 * 60 * 1000,
   deepRefresh: false,
   forceRefresh: false,
+  maxCommentsPerDay: 50,
 };
 
 const BLOCKED_DEFAULTS: BlockedPosts = {
@@ -136,9 +139,13 @@ export function loadBlocked(blockedPath?: string): BlockedPosts {
 let _config: AgentConfig | null = null;
 let _blocked: BlockedPosts | null = null;
 
-/** Get agent config — loads once, then cached. */
+/** Get agent config — loads once, then cached. Env vars override config.json. */
 export function getConfig(): AgentConfig {
-  if (!_config) _config = loadConfig();
+  if (!_config) {
+    _config = loadConfig();
+    // Env overrides
+    if (process.env.MAX_COMMENTS_PER_DAY) _config.maxCommentsPerDay = Number(process.env.MAX_COMMENTS_PER_DAY) || 50;
+  }
   return _config;
 }
 

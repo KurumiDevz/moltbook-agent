@@ -13,6 +13,7 @@
 import { readFileSync } from "node:fs";
 import { resolve } from "node:path";
 import type { Gateway } from "../gateway.js";
+import { getConfig } from "../config.js";
 import { SkillLoader, type Skill } from "../skills/index.js";
 import { getRelevantDocs } from "../context7.js";
 import type { FeedPost, NotificationItem, RateLimitState, AgentDecision } from "../types.js";
@@ -240,8 +241,9 @@ export class BrainV2 {
     },
   ): Promise<{ valid: boolean; fallback?: string; reason: string }> {
     // Daily comment limit safety
-    if ((decision.action === "comment" || decision.action === "reply_to_comment") && context.commentsToday >= 30) {
-      return { valid: false, fallback: "scroll", reason: `Daily comment limit: ${context.commentsToday}/50 used` };
+    const maxComments = getConfig().maxCommentsPerDay;
+    if ((decision.action === "comment" || decision.action === "reply_to_comment") && context.commentsToday >= maxComments) {
+      return { valid: false, fallback: "scroll", reason: `Daily comment limit: ${context.commentsToday}/${maxComments} used` };
     }
 
     // AI revalidation for reply/comment decisions — THIS is the real defense
