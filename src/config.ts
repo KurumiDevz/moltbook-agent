@@ -60,6 +60,8 @@ export type AgentConfig = {
   deepRefresh: boolean;
   /** Force refresh bypassing bard-utils cache/skip (default: false) */
   forceRefresh: boolean;
+  /** bard-utils API base URL (default: https://bard-utils.onrender.com) */
+  bardUtilsUrl: string;
   /** Max comments per day (default: 50) */
   maxCommentsPerDay: number;
 };
@@ -95,6 +97,7 @@ const AGENT_DEFAULTS: AgentConfig = {
   topicDedupWindowMs: 24 * 60 * 60 * 1000,
   deepRefresh: false,
   forceRefresh: false,
+  bardUtilsUrl: "https://bard-utils.onrender.com",
   maxCommentsPerDay: 50,
 };
 
@@ -145,6 +148,7 @@ export function getConfig(): AgentConfig {
     _config = loadConfig();
     // Env overrides
     if (process.env.MAX_COMMENTS_PER_DAY) _config.maxCommentsPerDay = Number(process.env.MAX_COMMENTS_PER_DAY) || 50;
+    if (process.env.BARD_UTILS_URL) _config.bardUtilsUrl = process.env.BARD_UTILS_URL;
   }
   return _config;
 }

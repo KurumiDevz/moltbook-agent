@@ -28,6 +28,8 @@ export type GeminiProviderConfig = ProviderConfig & {
   readonly conversationKey?: string;
   /** Use deep browser session refresh via bard-utils (default: false) */
   readonly deepRefresh?: boolean;
+  /** bard-utils API base URL (default: https://bard-utils.onrender.com) */
+  readonly bardUtilsUrl?: string;
 };
 
 // ─── Session refresh via bard-utils ───
@@ -37,8 +39,9 @@ async function refreshSession(opts: {
   readonly userAgent?: string;
   readonly deep?: boolean;
   readonly force?: boolean;
+  readonly baseUrl?: string;
 }): Promise<{ cookies: string; fSid: string; atToken: string } | null> {
-  const baseUrl = "https://bard-utils.onrender.com";
+  const baseUrl = opts.baseUrl ?? "https://bard-utils.onrender.com";
   const ua = "nimji/0.2.1 (github.com/Mra1k3r0/nimji)";
 
   try {
@@ -106,6 +109,7 @@ export class GeminiProvider implements Provider {
   private effectiveAtToken: string = "";
   private deepRefresh: boolean = false;
   private forceRefresh: boolean = false;
+  private bardUtilsUrl: string = "https://bard-utils.onrender.com";
 
   constructor() {
     this.defaultModel = "flash";
@@ -117,6 +121,7 @@ export class GeminiProvider implements Provider {
     this.conversationKey = config.conversationKey ?? "main";
     this.deepRefresh = (config.options?.deepRefresh as boolean) ?? false;
     this.forceRefresh = (config.options?.forceRefresh as boolean) ?? false;
+    this.bardUtilsUrl = (config.options?.bardUtilsUrl as string) ?? "https://bard-utils.onrender.com";
 
     // Load cookies: prefer saved (fresh) from gemini-session.json, fall back to .env
     const savedCookies = loadCookies();
@@ -135,6 +140,7 @@ export class GeminiProvider implements Provider {
       cookies,
       userAgent: config.options?.userAgent as string,
       deep: this.deepRefresh,
+      baseUrl: this.bardUtilsUrl,
     });
 
     if (refresh) {
@@ -229,6 +235,7 @@ export class GeminiProvider implements Provider {
         userAgent: this.config.options?.userAgent as string,
         deep: this.deepRefresh,
         force: useForce,
+        baseUrl: this.bardUtilsUrl,
       });
 
       if (refresh) break;
