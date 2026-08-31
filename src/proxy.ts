@@ -301,7 +301,9 @@ async function fetchSources(maxPerSource: number): Promise<ProxyCandidate[]> {
   if (fileProxies.length > 0) {
     const parsed = fileProxies.map(parseProxyLine).filter((p): p is string => p !== null);
     if (parsed.length > 0) {
-      return parsed.map((url) => ({
+      // Shuffle and cap to avoid testing too many proxies (rate limit protection)
+      const shuffled = parsed.sort(() => Math.random() - 0.5).slice(0, maxPerSource);
+      return shuffled.map((url) => ({
         url,
         source: "proxy.txt",
         alive: true,
@@ -406,31 +408,25 @@ export class ProxyManager {
 
       log(`[proxy] testing ${this.candidates.length} proxies...`);
 
-      // Test batch (parallel, 8 at a time)
-      const CONCURRENCY = 8;
-      for (let i = 0; i < this.candidates.length; i += CONCURRENCY) {
+      // Test one at a time with delay to avoid rate limits
+      for (const c of this.candidates) {
         if (this.disposed) return false;
-        const batch = this.candidates.slice(i, i + CONCURRENCY);
-        await Promise.allSettled(
-          batch.map(async (c) => {
-            const start = Date.now();
-            const tokenUrl = this.config.targetUrl.replace(/\/$/, "") + "/api/auth/token";
-            try {
-              const res = await proxyRequest(c.url, tokenUrl, "{}", this.config.headers, timeoutMs);
-              if (res.status === 200) {
-                const parsed = JSON.parse(res.body);
-                if (parsed.ok && parsed.data?.token) {
-                  c.latencyMs = Date.now() - start;
-                  c.alive = true;
-                  c.lastCheck = Date.now();
-                  return;
-                }
-              }
-            } catch {}
-            c.alive = false;
-            c.consecutiveFails = this.config.maxFails;
-          }),
-        );
+        const start = Date.now();
+        const tokenUrl = this.config.targetUrl.replace(/\/$/, "") + "/api/auth/token";
+        try {
+          const res = await proxyRequest(c.url, tokenUrl, "{}", this.config.headers, timeoutMs);
+          if (res.status === 200) {
+            const parsed = JSON.parse(res.body);
+            if (parsed.ok && parsed.data?.token) {
+              c.latencyMs = Date.now() - start;
+              c.alive = true;
+              c.lastCheck = Date.now();
+              log(`[proxy] ✅ ${maskProxyUrl(c.url)} (${c.latencyMs}ms)`);
+            }
+          }
+        } catch {}
+        // Small delay between tests to avoid hammering the API
+        await sleep(200);
       }
 
       // Pick best (alive + lowest latency)
@@ -505,7 +501,7 @@ export class ProxyManager {
     this.healthTimer = setInterval(() => this.healthCheck(), this.config.healthCheckMs);
   }
 
-  /** Check current proxy health, rotate if dead. */
+  /** Check current proxy health — full API call to verify proxy works */
   private async healthCheck(): Promise<void> {
     if (this.disposed) return;
     const c = this.current;
