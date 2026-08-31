@@ -11,6 +11,7 @@ import { GeminiProvider } from "./providers/index.js";
 import { createMoltbookAgent } from "./moltbook.js";
 import { AgentV2 } from "./agent/index.js";
 import { getConfig } from "./config.js";
+import { ProxyManager } from "./proxy.js";
 
 function parseArgs(argv: string[]) {
   const args: {
@@ -61,11 +62,34 @@ async function main() {
   const gemini = new GeminiProvider();
   gateway.registerProvider(gemini);
   const config = getConfig();
+
+  // Initialize proxy manager for Pterodactyl environments
+  let proxyManager: ProxyManager | undefined;
+  const bardUtilsUrl = process.env.BARD_UTILS_URL || config.bardUtilsUrl;
+  const useProxy = process.env.USE_PROXY === "true";
+  if (useProxy) {
+    console.log("🌐 Initializing proxy manager...");
+    proxyManager = new ProxyManager({
+      targetUrl: bardUtilsUrl,
+      headers: { "x-nimji-ua": "nimji/0.2.1 (github.com/Mra1k3r0/nimji)" },
+      timeoutMs: 8_000,
+      healthCheckMs: 60_000,
+      maxFails: 3,
+    });
+    const found = await proxyManager.initialize();
+    if (!found) {
+      console.error("❌ No working proxy found — cannot continue in proxy mode");
+      process.exit(1);
+    }
+    console.log(`🌐 Proxy ready: ${proxyManager.current?.url}`);
+  }
+
   await gateway.initializeProvider("gemini", { type: "gemini", options: {
     cookies,
     deepRefresh: process.env.DEEP_REFRESH === "true" || config.deepRefresh,
     forceRefresh: process.env.FORCE_REFRESH === "true" || config.forceRefresh,
-    bardUtilsUrl: process.env.BARD_UTILS_URL || config.bardUtilsUrl,
+    bardUtilsUrl,
+    ...(proxyManager ? { proxyManager } : {}),
   } });
 
   // Create Moltbook agent
@@ -100,6 +124,7 @@ async function main() {
   // Handle shutdown gracefully
   process.on("SIGINT", () => {
     agent.stop();
+    proxyManager?.dispose();
     process.exit(0);
   });
 

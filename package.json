@@ -20,7 +20,7 @@
     "agent": "tsx --env-file=.env src/cli.ts",
     "agent:dry": "tsx --env-file=.env src/cli.ts --dry-run",
     "test": "node --import tsx/esm --test tests/**/*.test.ts",
-    "postinstall": "node scripts/shim-undici.mjs"
+    "postinstall": "node scripts/shim-undici.mjs && node scripts/patch-nimji.mjs"
   },
   "keywords": [
     "moltbook",

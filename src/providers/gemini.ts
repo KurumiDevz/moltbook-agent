@@ -18,6 +18,7 @@ import { create, type GemaiClient } from "nimji";
 import { http } from "../http/index.js";
 import { saveCookies, loadCookies, loadConversation, saveConversation } from "../session-manager.js";
 import type { GenerateRequest, GenerateResponse, Provider, ProviderCapabilities, ProviderConfig } from "./types.js";
+import type { ProxyManager } from "../proxy.js";
 
 export type GeminiProviderConfig = ProviderConfig & {
   /** Browser session cookies for Gemini web API */
@@ -30,6 +31,8 @@ export type GeminiProviderConfig = ProviderConfig & {
   readonly deepRefresh?: boolean;
   /** bard-utils API base URL (default: https://bard-utils.onrender.com) */
   readonly bardUtilsUrl?: string;
+  /** Optional proxy manager for Pterodactyl environments */
+  readonly proxyManager?: ProxyManager;
 };
 
 // ─── Session refresh via bard-utils ───
@@ -40,37 +43,46 @@ async function refreshSession(opts: {
   readonly deep?: boolean;
   readonly force?: boolean;
   readonly baseUrl?: string;
+  /** Custom fetch function that routes through proxy if set */
+  readonly fetchFn?: (url: string, opts: { method?: string; body?: string; headers?: Record<string, string> }) => Promise<{ status: number; body: string }>;
 }): Promise<{ cookies: string; fSid: string; atToken: string } | null> {
   const baseUrl = opts.baseUrl ?? "https://bard-utils.onrender.com";
   const ua = "nimji/0.2.1 (github.com/Mra1k3r0/nimji)";
+  const fetch = opts.fetchFn ?? directFetch;
 
   try {
-    const { data: tokenData } = await http<{ ok: boolean; data?: { token: string } }>(`${baseUrl}/api/auth/token`, {
+    // Step 1: Get auth token
+    const tokenRes = await fetch(`${baseUrl}/api/auth/token`, {
       method: "POST",
       headers: { "content-type": "application/json", "x-nimji-ua": ua },
-      body: {},
+      body: "{}",
     });
+    if (tokenRes.status !== 200) return null;
+    const tokenData = JSON.parse(tokenRes.body) as { ok: boolean; data?: { token: string } };
     if (!tokenData.ok || !tokenData.data) return null;
 
-    const { data: refreshData } = await http<{
-      ok: boolean;
-      data?: { cookies: string; fSid: string; atToken: string };
-    }>(`${baseUrl}/api/refresh`, {
+    // Step 2: Refresh cookies
+    const refreshRes = await fetch(`${baseUrl}/api/refresh`, {
       method: "POST",
       headers: {
         "content-type": "application/json",
         authorization: `Bearer ${tokenData.data.token}`,
         "x-nimji-ua": ua,
       },
-      body: {
+      body: JSON.stringify({
         cookies: opts.cookies,
         ...(opts.userAgent ? { userAgent: opts.userAgent } : {}),
         ...(opts.deep ? { deep: true } : {}),
         ...(opts.force ? { force: true } : {}),
-      },
+      }),
     });
-
+    if (refreshRes.status !== 200) return null;
+    const refreshData = JSON.parse(refreshRes.body) as {
+      ok: boolean;
+      data?: { cookies: string; fSid: string; atToken: string };
+    };
     if (!refreshData.ok || !refreshData.data) return null;
+
     return {
       cookies: refreshData.data.cookies,
       fSid: refreshData.data.fSid ?? "",
@@ -79,6 +91,16 @@ async function refreshSession(opts: {
   } catch {
     return null;
   }
+}
+
+/** Direct HTTP fetch (no proxy) — uses undici */
+async function directFetch(url: string, opts: { method?: string; body?: string; headers?: Record<string, string> }): Promise<{ status: number; body: string }> {
+  const res = await http<{ status: number; body: string }>(url, {
+    method: (opts.method as any) ?? "POST",
+    headers: opts.headers,
+    body: opts.body ? JSON.parse(opts.body) : {},
+  });
+  return { status: res.status, body: typeof res.data === "string" ? res.data : JSON.stringify(res.data) };
 }
 
 // ─── Response quality classification (from nimji CLI) ───
@@ -110,6 +132,7 @@ export class GeminiProvider implements Provider {
   private deepRefresh: boolean = false;
   private forceRefresh: boolean = false;
   private bardUtilsUrl: string = "https://bard-utils.onrender.com";
+  private proxyManager: ProxyManager | null = null;
 
   constructor() {
     this.defaultModel = "flash";
@@ -122,6 +145,7 @@ export class GeminiProvider implements Provider {
     this.deepRefresh = (config.options?.deepRefresh as boolean) ?? false;
     this.forceRefresh = (config.options?.forceRefresh as boolean) ?? false;
     this.bardUtilsUrl = (config.options?.bardUtilsUrl as string) ?? "https://bard-utils.onrender.com";
+    this.proxyManager = (config.options?.proxyManager as ProxyManager) ?? null;
 
     // Load cookies: prefer saved (fresh) from gemini-session.json, fall back to .env
     const savedCookies = loadCookies();
@@ -136,11 +160,13 @@ export class GeminiProvider implements Provider {
     this.defaultModel = config.defaultModel ?? (config.options?.model as string) ?? "flash";
 
     // Refresh session via bard-utils (extracts fSid, atToken, rotates cookies)
+    const fetchFn = this.getProxyFetch();
     const refresh = await refreshSession({
       cookies,
       userAgent: config.options?.userAgent as string,
       deep: this.deepRefresh,
       baseUrl: this.bardUtilsUrl,
+      fetchFn,
     });
 
     if (refresh) {
@@ -218,6 +244,18 @@ export class GeminiProvider implements Provider {
     return this.client !== null;
   }
 
+  /** Returns a fetch function that routes through the proxy manager if available */
+  private getProxyFetch(): ((url: string, opts: { method?: string; body?: string; headers?: Record<string, string> }) => Promise<{ status: number; body: string }>) | undefined {
+    if (!this.proxyManager) return undefined;
+    const mgr = this.proxyManager;
+    const base = this.bardUtilsUrl.replace(/\/$/, "");
+    return (url, opts) => {
+      // Strip base URL to get just the path — ProxyManager.fetch expects a path
+      const path = url.startsWith(base) ? url.slice(base.length) : url;
+      return mgr.fetch(path, opts);
+    };
+  }
+
   /** Full session refresh: rotate cookies + fSid + atToken + recreate client */
   private async refreshSession(force = false): Promise<void> {
     if (!this.config) return;
@@ -236,6 +274,7 @@ export class GeminiProvider implements Provider {
         deep: this.deepRefresh,
         force: useForce,
         baseUrl: this.bardUtilsUrl,
+        fetchFn: this.getProxyFetch(),
       });
 
       if (refresh) break;

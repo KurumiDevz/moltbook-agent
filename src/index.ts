@@ -15,6 +15,7 @@ export { BrainV2 } from "./brain/index.js";
 export { SkillLoader } from "./skills/index.js";
 export { SummaryGenerator } from "./summary.js";
 export { runSubAgentTask } from "./sub-agent.js";
+export { ProxyManager } from "./proxy.js";
 export {
   loadCookies,
   saveCookies,
@@ -49,3 +50,4 @@ export type { AgentDecision, FeedPost, NotificationItem, RateLimitState } from "
 export type { ActivitySummary } from "./summary.js";
 export type { SubAgentTask, SubAgentResult, ScoredPost } from "./sub-agent.js";
 export type { CookieState, ConversationState } from "./session-manager.js";
+export type { ProxyCandidate, ProxyManagerConfig, ProxyRequestOptions } from "./proxy.js";
