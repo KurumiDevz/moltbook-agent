@@ -278,13 +278,19 @@ function postThroughTunnel(socket: net.Socket, targetUrl: string, body: string, 
 
 async function proxyRequest(proxyUrl: string, targetUrl: string, body: string, headers: Record<string, string>, timeoutMs: number): Promise<{ status: number; body: string }> {
   const target = new URL(targetUrl);
+  const targetPort = Number(target.port) || (target.protocol === "https:" ? 443 : 80);
+
+  // Always use CONNECT tunnel — works for both HTTP and HTTPS targets
+  const socket = await connectThroughProxy(proxyUrl, target.hostname, targetPort, timeoutMs);
+
+  // Only do TLS handshake for HTTPS targets
   if (target.protocol === "https:") {
-    const targetPort = Number(target.port) || 443;
-    const socket = await connectThroughProxy(proxyUrl, target.hostname, targetPort, timeoutMs);
     const tlsSocket = tls.connect({ socket, servername: target.hostname, rejectUnauthorized: false });
     return postThroughTunnel(tlsSocket as any, targetUrl, body, headers, timeoutMs);
   }
-  return classicHttpProxy(proxyUrl, targetUrl, body, headers, timeoutMs);
+
+  // HTTP target — send raw through tunnel (no TLS)
+  return postThroughTunnel(socket as any, targetUrl, body, headers, timeoutMs);
 }
 
 // ─── Source fetching ───
