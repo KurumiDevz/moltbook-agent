@@ -89,6 +89,8 @@ async function main() {
     deepRefresh: process.env.DEEP_REFRESH === "true" || config.deepRefresh,
     forceRefresh: process.env.FORCE_REFRESH === "true" || config.forceRefresh,
     bardUtilsUrl,
+    keepaliveIntervalMs: config.keepaliveIntervalMs,
+    refreshIntervalMs: config.refreshIntervalMs,
     ...(proxyManager ? { proxyManager } : {}),
   } });
 

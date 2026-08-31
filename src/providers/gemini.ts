@@ -116,6 +116,62 @@ async function directFetch(url: string, opts: { method?: string; body?: string; 
   return { status: res.status, body: typeof res.data === "string" ? res.data : JSON.stringify(res.data) };
 }
 
+// ─── Bard-utils browserinfo keepalive ───
+
+/**
+ * Bard-utils browserinfo keepalive — pings Google's identity surface
+ * to keep the at token fresh. This is NOT nimji's keepalive timer
+ * (which handles per-request cookie rotation internally).
+ *
+ * Calls POST /api/browserinfo on bard-utils. Returns updated cookies on success.
+ */
+async function browserinfoKeepalive(opts: {
+  readonly cookies: string;
+  readonly baseUrl: string;
+  readonly fetchFn?: (url: string, opts: { method?: string; body?: string; headers?: Record<string, string> }) => Promise<{ status: number; body: string }>;
+}): Promise<string | false> {
+  const fetchFn = opts.fetchFn ?? directFetch;
+  const { baseUrl, cookies } = opts;
+
+  try {
+    // Step 1: Mint auth token
+    const tokenRes = await fetchFn(`${baseUrl}/api/auth/token`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: "{}",
+    });
+    if (tokenRes.status !== 200) return false;
+    const tokenData = JSON.parse(tokenRes.body) as { data?: { token?: string } };
+    const token = tokenData.data?.token;
+    if (!token) return false;
+
+    // Step 2: POST /api/browserinfo
+    const biRes = await fetchFn(`${baseUrl}/api/browserinfo`, {
+      method: "POST",
+      headers: {
+        "content-type": "application/json",
+        authorization: `Bearer ${token}`,
+      },
+      body: JSON.stringify({ cookies }),
+    });
+    if (biRes.status !== 200) return false;
+
+    const data = JSON.parse(biRes.body) as {
+      ok: boolean;
+      data?: { cookies: string; statusCode: number; rotatedCount: number };
+    };
+    if (!data.ok || !data.data) return false;
+
+    console.log(`[keepalive] browserinfo ${data.data.statusCode} — ${data.data.rotatedCount} cookies rotated`);
+
+    // Return updated cookies (browserinfo may rotate SIDCC etc.)
+    return data.data.cookies;
+  } catch (err) {
+    console.log("[keepalive] browserinfo failed:", err);
+    return false;
+  }
+}
+
 // ─── Response quality classification (from nimji CLI) ───
 
 function classifyResponse(value: {
@@ -139,6 +195,8 @@ export class GeminiProvider implements Provider {
   private conversationKey: string;
   private keepaliveTimer: ReturnType<typeof setInterval> | null = null;
   private refreshTimer: ReturnType<typeof setInterval> | null = null;
+  private keepaliveIntervalMs: number = 120_000;    // 2 min — browserinfo ping
+  private refreshIntervalMs: number = 1_200_000;   // 20 min — full refresh cycle
   private effectiveCookies: string = "";
   private effectiveFSid: string = "";
   private effectiveAtToken: string = "";
@@ -159,6 +217,8 @@ export class GeminiProvider implements Provider {
     this.forceRefresh = (config.options?.forceRefresh as boolean) ?? false;
     this.bardUtilsUrl = (config.options?.bardUtilsUrl as string) ?? "https://bard-utils.onrender.com";
     this.proxyManager = (config.options?.proxyManager as ProxyManager) ?? null;
+    this.keepaliveIntervalMs = (config.options?.keepaliveIntervalMs as number) ?? 120_000;
+    this.refreshIntervalMs = (config.options?.refreshIntervalMs as number) ?? 1_200_000;
 
     // Load cookies: prefer saved (fresh) from gemini-session.json, fall back to .env
     const savedCookies = loadCookies();
@@ -217,25 +277,33 @@ export class GeminiProvider implements Provider {
   private startKeepalive(): void {
     if (this.keepaliveTimer) return;
 
-    // Keepalive ping handled by nimji ({ keepalive: true })
-    // this.keepaliveTimer = setInterval(async () => {
-    //   if (!this.client) return;
-    //   try {
-    //     const test = await this.client.generate({ prompt: "hi" });
-    //     if (test.isErr()) {
-    //       console.log("[gemini-provider] Keepalive failed — refreshing session...");
-    //       await this.refreshSession();
-    //     }
-    //   } catch {
-    //     console.log("[gemini-provider] Keepalive failed — refreshing session...");
-    //     await this.refreshSession();
-    //   }
-    // }, 7 * 60_000);
+    // ── Bard-utils browserinfo keepalive (every 2 min) ──
+    // Pings Google's identity surface to keep the at token fresh.
+    // This is NOT nimji's keepalive — nimji handles per-request cookie rotation.
+    // This calls POST /api/browserinfo on bard-utils, which hits
+    // myaccount.google.com/_/AccountSettingsUi/browserinfo.
+    this.keepaliveTimer = setInterval(async () => {
+      try {
+        const updatedCookies = await browserinfoKeepalive({
+          cookies: this.effectiveCookies,
+          baseUrl: this.bardUtilsUrl,
+          fetchFn: this.getProxyFetch(),
+        });
+        if (updatedCookies) {
+          this.effectiveCookies = updatedCookies;
+          saveCookies({ cookies: updatedCookies });
+        }
+      } catch (err) {
+        console.log("[keepalive] browserinfo keepalive error:", err);
+      }
+    }, this.keepaliveIntervalMs);
 
-    // Cookie + token rotation every 5 minutes
+    // ── Full refresh (every 20 min) ──
+    // Calls POST /api/refresh: extractTokens + browserinfo + RotateCookies.
+    // This is the heavy rotation — browserinfo alone is not enough for rotation.
     this.refreshTimer = setInterval(async () => {
       await this.refreshSession();
-    }, 5 * 60_000);
+    }, this.refreshIntervalMs);
   }
 
   private stopKeepalive(): void {

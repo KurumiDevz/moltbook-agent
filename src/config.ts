@@ -64,6 +64,10 @@ export type AgentConfig = {
   bardUtilsUrl: string;
   /** Max comments per day (default: 50) */
   maxCommentsPerDay: number;
+  /** Interval between browserinfo pings to keep at token fresh (default: 120000 = 2 min) */
+  keepaliveIntervalMs: number;
+  /** Interval between full refresh cycles — extractTokens + browserinfo + RotateCookies (default: 1200000 = 20 min) */
+  refreshIntervalMs: number;
 };
 
 export type BlockedPosts = {
@@ -99,6 +103,8 @@ const AGENT_DEFAULTS: AgentConfig = {
   forceRefresh: false,
   bardUtilsUrl: "https://bard-utils.onrender.com",
   maxCommentsPerDay: 50,
+  keepaliveIntervalMs: 120_000,    // 2 min — browserinfo ping
+  refreshIntervalMs: 1_200_000,    // 20 min — full refresh cycle
 };
 
 const BLOCKED_DEFAULTS: BlockedPosts = {
@@ -149,6 +155,8 @@ export function getConfig(): AgentConfig {
     // Env overrides
     if (process.env.MAX_COMMENTS_PER_DAY) _config.maxCommentsPerDay = Number(process.env.MAX_COMMENTS_PER_DAY) || 50;
     if (process.env.BARD_UTILS_URL) _config.bardUtilsUrl = process.env.BARD_UTILS_URL;
+    if (process.env.KEEPALIVE_INTERVAL_MS) _config.keepaliveIntervalMs = Number(process.env.KEEPALIVE_INTERVAL_MS) || 120_000;
+    if (process.env.REFRESH_INTERVAL_MS) _config.refreshIntervalMs = Number(process.env.REFRESH_INTERVAL_MS) || 1_200_000;
   }
   return _config;
 }
