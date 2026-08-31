@@ -57,7 +57,13 @@ async function refreshSession(opts: {
       headers: { "content-type": "application/json", "x-nimji-ua": ua },
       body: "{}",
     });
-    if (tokenRes.status !== 200) return null;
+    if (process.env.DEBUG) {
+      console.log(`[gemini-provider] Token fetch: status=${tokenRes.status} via ${opts.fetchFn ? "proxy" : "direct"}`);
+    }
+    if (tokenRes.status !== 200) {
+      if (process.env.DEBUG) console.log(`[gemini-provider] Token failed: ${tokenRes.body.slice(0, 200)}`);
+      return null;
+    }
     const tokenData = JSON.parse(tokenRes.body) as { ok: boolean; data?: { token: string } };
     if (!tokenData.ok || !tokenData.data) return null;
 
@@ -76,19 +82,26 @@ async function refreshSession(opts: {
         ...(opts.force ? { force: true } : {}),
       }),
     });
-    if (refreshRes.status !== 200) return null;
+    if (refreshRes.status !== 200) {
+      if (process.env.DEBUG) console.log(`[gemini-provider] Refresh failed: status=${refreshRes.status} ${refreshRes.body.slice(0, 200)}`);
+      return null;
+    }
     const refreshData = JSON.parse(refreshRes.body) as {
       ok: boolean;
       data?: { cookies: string; fSid: string; atToken: string };
     };
-    if (!refreshData.ok || !refreshData.data) return null;
+    if (!refreshData.ok || !refreshData.data) {
+      if (process.env.DEBUG) console.log(`[gemini-provider] Refresh response not ok: ${refreshRes.body.slice(0, 200)}`);
+      return null;
+    }
 
     return {
       cookies: refreshData.data.cookies,
       fSid: refreshData.data.fSid ?? "",
       atToken: refreshData.data.atToken ?? "",
     };
-  } catch {
+  } catch (err: any) {
+    if (process.env.DEBUG) console.log(`[gemini-provider] Refresh error: ${err.message}`);
     return null;
   }
 }
@@ -172,9 +185,9 @@ export class GeminiProvider implements Provider {
     if (refresh) {
       cookies = refresh.cookies;
       saveCookies({ cookies: refresh.cookies });
-      if (process.env.DEBUG) {
-        console.log("[gemini-provider] Session refreshed via bard-utils");
-      }
+      console.log(`[gemini-provider] Session refreshed via bard-utils${fetchFn ? " (proxy)" : ""}`);
+    } else {
+      console.log("[gemini-provider] Session refresh FAILED — using stored cookies");
     }
 
     this.effectiveCookies = cookies;

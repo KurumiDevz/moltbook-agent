@@ -339,6 +339,22 @@ async function fetchSources(maxPerSource: number): Promise<ProxyCandidate[]> {
 
 // ─── ProxyManager ───
 
+/** Mask proxy URL credentials: http://user:pass@host → http://u***:p***@host */
+export function maskProxyUrl(url: string): string {
+  try {
+    const u = new URL(url);
+    if (u.username) {
+      u.username = u.username[0] + "***";
+    }
+    if (u.password) {
+      u.password = u.password[0] + "***";
+    }
+    return u.toString();
+  } catch {
+    return url.replace(/:[^:@]+@/, ":***@");
+  }
+}
+
 export class ProxyManager {
   private config: Required<ProxyManagerConfig>;
   private candidates: ProxyCandidate[] = [];
@@ -424,7 +440,7 @@ export class ProxyManager {
 
       if (alive.length > 0) {
         this.currentIdx = this.candidates.indexOf(alive[0]);
-        log(`[proxy] ✅ found ${alive.length} working proxies, best: ${alive[0].url} (${alive[0].latencyMs}ms)`);
+        log(`[proxy] ✅ found ${alive.length} working proxies, best: ${maskProxyUrl(alive[0].url)} (${alive[0].latencyMs}ms)`);
         this.startHealthCheck();
         return true;
       }
@@ -466,7 +482,7 @@ export class ProxyManager {
         c.consecutiveFails++;
         if (c.consecutiveFails >= this.config.maxFails) {
           c.alive = false;
-          this.config.log(`[proxy] ❌ ${c.url} demoted (${c.consecutiveFails} fails)`);
+          this.config.log(`[proxy] ❌ ${maskProxyUrl(c.url)} demoted (${c.consecutiveFails} fails)`);
         }
       }
     }
@@ -479,7 +495,7 @@ export class ProxyManager {
     const idx = this.pickNext(new Set([this.currentIdx]));
     if (idx === -1) return false;
     this.currentIdx = idx;
-    this.config.log(`[proxy] 🔄 rotated to ${this.candidates[idx].url}`);
+    this.config.log(`[proxy] 🔄 rotated to ${maskProxyUrl(this.candidates[idx].url)}`);
     return true;
   }
 
@@ -514,7 +530,7 @@ export class ProxyManager {
     c.consecutiveFails++;
     if (c.consecutiveFails >= this.config.maxFails) {
       c.alive = false;
-      this.config.log(`[proxy] 💀 ${c.url} died — rotating`);
+      this.config.log(`[proxy] 💀 ${maskProxyUrl(c.url)} died — rotating`);
       this.rotate();
     }
   }

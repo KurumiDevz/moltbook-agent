@@ -15,7 +15,7 @@ export { BrainV2 } from "./brain/index.js";
 export { SkillLoader } from "./skills/index.js";
 export { SummaryGenerator } from "./summary.js";
 export { runSubAgentTask } from "./sub-agent.js";
-export { ProxyManager } from "./proxy.js";
+export { ProxyManager, maskProxyUrl } from "./proxy.js";
 export {
   loadCookies,
   saveCookies,

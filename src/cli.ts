@@ -11,7 +11,7 @@ import { GeminiProvider } from "./providers/index.js";
 import { createMoltbookAgent } from "./moltbook.js";
 import { AgentV2 } from "./agent/index.js";
 import { getConfig } from "./config.js";
-import { ProxyManager } from "./proxy.js";
+import { ProxyManager, maskProxyUrl } from "./proxy.js";
 
 function parseArgs(argv: string[]) {
   const args: {
@@ -81,7 +81,7 @@ async function main() {
       console.error("❌ No working proxy found — cannot continue in proxy mode");
       process.exit(1);
     }
-    console.log(`🌐 Proxy ready: ${proxyManager.current?.url}`);
+    console.log(`🌐 Proxy ready: ${proxyManager.current ? maskProxyUrl(proxyManager.current.url) : "none"}`);
   }
 
   await gateway.initializeProvider("gemini", { type: "gemini", options: {
