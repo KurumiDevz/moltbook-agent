@@ -250,12 +250,19 @@ function postThroughTunnel(socket: net.Socket, targetUrl: string, body: string, 
     const target = new URL(targetUrl);
     const path = target.pathname;
 
+    // Filter out headers we set ourselves to avoid duplicates
+    const skipHeaders = new Set(["content-type", "content-length", "host", "connection"]);
+    const extraHeaders = Object.entries(headers)
+      .filter(([k]) => !skipHeaders.has(k.toLowerCase()))
+      .map(([k, v]) => `${k}: ${v}`)
+      .join("\r\n");
+
     const request =
       `POST ${path} HTTP/1.1\r\n` +
       `Host: ${target.hostname}${target.port ? ":" + target.port : ""}\r\n` +
       `Content-Type: application/json\r\n` +
       `Content-Length: ${Buffer.byteLength(body)}\r\n` +
-      Object.entries(headers).map(([k, v]) => `${k}: ${v}`).join("\r\n") + "\r\n" +
+      (extraHeaders ? extraHeaders + "\r\n" : "") +
       `Connection: close\r\n\r\n` +
       body;
 
@@ -408,25 +415,54 @@ export class ProxyManager {
 
       log(`[proxy] testing ${this.candidates.length} proxies...`);
 
-      // Test one at a time with delay to avoid rate limits
-      for (const c of this.candidates) {
-        if (this.disposed) return false;
-        const start = Date.now();
-        const tokenUrl = this.config.targetUrl.replace(/\/$/, "") + "/api/auth/token";
-        try {
-          const res = await proxyRequest(c.url, tokenUrl, "{}", this.config.headers, timeoutMs);
-          if (res.status === 200) {
-            const parsed = JSON.parse(res.body);
-            if (parsed.ok && parsed.data?.token) {
-              c.latencyMs = Date.now() - start;
-              c.alive = true;
-              c.lastCheck = Date.now();
-              log(`[proxy] ✅ ${maskProxyUrl(c.url)} (${c.latencyMs}ms)`);
+      const isProxyFile = this.candidates[0]?.source === "proxy.txt";
+      const tokenUrl = this.config.targetUrl.replace(/\/$/, "") + "/api/auth/token";
+
+      if (isProxyFile) {
+        // proxy.txt: test one at a time with delay to avoid rate limits
+        for (const c of this.candidates) {
+          if (this.disposed) return false;
+          const start = Date.now();
+          try {
+            const res = await proxyRequest(c.url, tokenUrl, "{}", this.config.headers, timeoutMs);
+            if (res.status === 200) {
+              const parsed = JSON.parse(res.body);
+              if (parsed.ok && parsed.data?.token) {
+                c.latencyMs = Date.now() - start;
+                c.alive = true;
+                c.lastCheck = Date.now();
+                log(`[proxy] ✅ ${maskProxyUrl(c.url)} (${c.latencyMs}ms)`);
+              }
             }
-          }
-        } catch {}
-        // Small delay between tests to avoid hammering the API
-        await sleep(200);
+          } catch {}
+          await sleep(200);
+        }
+      } else {
+        // Free sources: test in parallel batches (faster, less rate limit risk per source)
+        const CONCURRENCY = 8;
+        for (let i = 0; i < this.candidates.length; i += CONCURRENCY) {
+          if (this.disposed) return false;
+          const batch = this.candidates.slice(i, i + CONCURRENCY);
+          await Promise.allSettled(
+            batch.map(async (c) => {
+              const start = Date.now();
+              try {
+                const res = await proxyRequest(c.url, tokenUrl, "{}", this.config.headers, timeoutMs);
+                if (res.status === 200) {
+                  const parsed = JSON.parse(res.body);
+                  if (parsed.ok && parsed.data?.token) {
+                    c.latencyMs = Date.now() - start;
+                    c.alive = true;
+                    c.lastCheck = Date.now();
+                    return;
+                  }
+                }
+              } catch {}
+              c.alive = false;
+              c.consecutiveFails = this.config.maxFails;
+            }),
+          );
+        }
       }
 
       // Pick best (alive + lowest latency)
