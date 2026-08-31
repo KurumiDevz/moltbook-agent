@@ -128,24 +128,14 @@ async function directFetch(url: string, opts: { method?: string; body?: string; 
 async function browserinfoKeepalive(opts: {
   readonly cookies: string;
   readonly baseUrl: string;
+  readonly token: string;
   readonly fetchFn?: (url: string, opts: { method?: string; body?: string; headers?: Record<string, string> }) => Promise<{ status: number; body: string }>;
 }): Promise<string | false> {
   const fetchFn = opts.fetchFn ?? directFetch;
-  const { baseUrl, cookies } = opts;
+  const { baseUrl, cookies, token } = opts;
 
   try {
-    // Step 1: Mint auth token
-    const tokenRes = await fetchFn(`${baseUrl}/api/auth/token`, {
-      method: "POST",
-      headers: { "content-type": "application/json" },
-      body: "{}",
-    });
-    if (tokenRes.status !== 200) return false;
-    const tokenData = JSON.parse(tokenRes.body) as { data?: { token?: string } };
-    const token = tokenData.data?.token;
-    if (!token) return false;
-
-    // Step 2: POST /api/browserinfo
+    // POST /api/browserinfo — use provided token, no mint call
     const biRes = await fetchFn(`${baseUrl}/api/browserinfo`, {
       method: "POST",
       headers: {
@@ -204,6 +194,8 @@ export class GeminiProvider implements Provider {
   private forceRefresh: boolean = false;
   private bardUtilsUrl: string = "https://bard-utils.onrender.com";
   private proxyManager: ProxyManager | null = null;
+  private cachedToken: string | null = null;
+  private tokenExpiresAt: number = 0;
 
   constructor() {
     this.defaultModel = "flash";
@@ -255,7 +247,8 @@ export class GeminiProvider implements Provider {
     this.effectiveAtToken = refresh?.atToken ?? "";
 
     // Create nimji client with refreshed cookies + auth tokens
-    // Nimji's internal rotation is enabled as safety net alongside our5-min refresh
+    // Nimji's internal batchexecute keepalive (8 min) pings Google to keep session alive
+    // NOTE: nimji keepalive is untested — our browserinfo (2 min) + full refresh (20 min) handle it
     this.client = create({
       COOKIES: cookies,
       MODEL: this.defaultModel,
@@ -270,7 +263,10 @@ export class GeminiProvider implements Provider {
     // Gemini accumulates context that causes parse failures after restart
     this.client.resetConversation();
 
-    // Start keepalive (10 min) + cookie rotation (8 min)
+    // Start keepalive timers:
+    // - browserinfo every 2 min (our code — keeps at token fresh)
+    // - nimji batchexecute every 8 min (nimji internal — keeps session alive, UNTESTED)
+    // - full refresh every 20 min (our code — rotate cookies + fSid + atToken)
     this.startKeepalive();
   }
 
@@ -284,9 +280,16 @@ export class GeminiProvider implements Provider {
     // myaccount.google.com/_/AccountSettingsUi/browserinfo.
     this.keepaliveTimer = setInterval(async () => {
       try {
+        const token = await this.getToken();
+        if (!token) {
+          console.log("[keepalive] failed to get auth token");
+          return;
+        }
+
         const updatedCookies = await browserinfoKeepalive({
           cookies: this.effectiveCookies,
           baseUrl: this.bardUtilsUrl,
+          token,
           fetchFn: this.getProxyFetch(),
         });
         if (updatedCookies) {
@@ -335,6 +338,39 @@ export class GeminiProvider implements Provider {
       const path = url.startsWith(base) ? url.slice(base.length) : url;
       return mgr.fetch(path, opts);
     };
+  }
+
+  /**
+   * Get a valid auth token from bard-utils, minting a new one only when
+   * the cached token is expired or within 60s of expiry.
+   *
+   * Cuts /api/auth/token calls from ~13/hr to ~1/hr.
+   */
+  private async getToken(): Promise<string | null> {
+    // Reuse cached token if still valid (60s buffer before expiry)
+    if (this.cachedToken && Date.now() < this.tokenExpiresAt - 60_000) {
+      return this.cachedToken;
+    }
+
+    const fetchFn = this.getProxyFetch() ?? directFetch;
+    try {
+      const resp = await fetchFn(`${this.bardUtilsUrl}/api/auth/token`, {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: "{}",
+      });
+      if (resp.status !== 200) return null;
+      const data = JSON.parse(resp.body) as {
+        data?: { token?: string; expiresIn?: number };
+      };
+      if (!data.data?.token) return null;
+
+      this.cachedToken = data.data.token;
+      this.tokenExpiresAt = Date.now() + (data.data.expiresIn ?? 3600) * 1000;
+      return this.cachedToken;
+    } catch {
+      return null;
+    }
   }
 
   /** Full session refresh: rotate cookies + fSid + atToken + recreate client */
@@ -398,7 +434,8 @@ export class GeminiProvider implements Provider {
     }
 
     // Recreate nimji client with fresh tokens
-    // Nimji's internal rotation is enabled as safety net alongside our5-min refresh
+    // Nimji's internal batchexecute keepalive (8 min) pings Google to keep session alive
+    // NOTE: nimji keepalive is untested — our browserinfo (2 min) + full refresh (20 min) handle it
     this.client = create({
       COOKIES: refresh.cookies,
       MODEL: this.defaultModel,
@@ -628,6 +665,8 @@ export class GeminiProvider implements Provider {
 
   async dispose(): Promise<void> {
     this.stopKeepalive();
+    this.cachedToken = null;
+    this.tokenExpiresAt = 0;
     if (this.client) {
       this.client.stopKeepalive();
       this.client = null;
