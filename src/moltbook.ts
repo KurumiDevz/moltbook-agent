@@ -87,12 +87,10 @@ export class MoltbookAgent {
 
   /** Generic authenticated request helper */
   private async request<T>(method: string, path: string, body?: unknown): Promise<Result<T, MoltbookApiError>> {
-    const headers: Record<string, string> = { "Content-Type": "application/json" };
-    if (path.includes("/upvote") || path.includes("/downvote")) {
-      headers["Authorization"] = `Bearer ${this.apiKey}`;
-    } else {
-      headers["X-API-Key"] = this.apiKey;
-    }
+    const headers: Record<string, string> = {
+      "Content-Type": "application/json",
+      "Authorization": `Bearer ${this.apiKey}`,
+    };
     const { status, data } = await http<T>(`${this.baseUrl}${path}`, {
       method: method as "GET" | "POST" | "PUT" | "PATCH" | "DELETE",
       headers,

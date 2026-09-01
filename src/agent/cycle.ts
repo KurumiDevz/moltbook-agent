@@ -147,6 +147,7 @@ async function scoreFeed(
         createdAt: "",
       }));
     }
+    console.log("[cycle] sub-agent returned malformed scored feed, falling back to raw feed");
     return rawFeed;
   } catch {
     return rawFeed;
