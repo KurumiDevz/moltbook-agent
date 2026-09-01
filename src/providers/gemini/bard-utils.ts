@@ -16,6 +16,10 @@ export type BardUtilsFetchFn = (
 
 // ─── Session refresh via bard-utils ───
 
+/** Cached auth token to avoid redundant /api/auth/token calls (55 min TTL) */
+let _cachedAuthToken: string | null = null;
+let _authTokenExpiresAt = 0;
+
 export async function refreshSession(opts: {
   readonly cookies: string;
   readonly userAgent?: string;
@@ -30,30 +34,39 @@ export async function refreshSession(opts: {
   const fetch = opts.fetchFn ?? directFetch;
 
   try {
-    // Step 1: Get auth token
-    const tokenRes = await fetch(`${baseUrl}/api/auth/token`, {
-      method: "POST",
-      headers: { "content-type": "application/json", "x-nimji-ua": ua },
-      body: "{}",
-    });
-    if (process.env.DEBUG) {
-      console.log(`[gemini-provider] Token fetch: status=${tokenRes.status} via ${opts.fetchFn ? "proxy" : "direct"}`);
+    // Step 1: Get auth token (reuse cached if still valid)
+    let token: string;
+    const now = Date.now();
+    if (_cachedAuthToken && now < _authTokenExpiresAt) {
+      token = _cachedAuthToken;
+    } else {
+      const tokenRes = await fetch(`${baseUrl}/api/auth/token`, {
+        method: "POST",
+        headers: { "content-type": "application/json", "x-nimji-ua": ua },
+        body: "{}",
+      });
+      if (process.env.DEBUG) {
+        console.log(`[gemini-provider] Token fetch: status=${tokenRes.status} via ${opts.fetchFn ? "proxy" : "direct"}`);
+      }
+      if (tokenRes.status !== 200) {
+        if (process.env.DEBUG) console.log(`[gemini-provider] Token failed: ${tokenRes.body.slice(0, 200)}`);
+        return null;
+      }
+      const tokenData = JSON.parse(tokenRes.body) as { ok: boolean; data?: { token: string } };
+      if (!tokenData.ok || !tokenData.data) return null;
+      token = tokenData.data.token;
+      _cachedAuthToken = token;
+      _authTokenExpiresAt = now + 55 * 60 * 1000;
     }
-    if (tokenRes.status !== 200) {
-      if (process.env.DEBUG) console.log(`[gemini-provider] Token failed: ${tokenRes.body.slice(0, 200)}`);
-      return null;
-    }
-    const tokenData = JSON.parse(tokenRes.body) as { ok: boolean; data?: { token: string } };
-    if (!tokenData.ok || !tokenData.data) return null;
 
     // Step 2: Refresh cookies
     const refreshRes = await fetch(`${baseUrl}/api/refresh`, {
       method: "POST",
       headers: {
-        "content-type": "application/json",
-        authorization: `Bearer ${tokenData.data.token}`,
-        "x-nimji-ua": ua,
-      },
+          "content-type": "application/json",
+          authorization: `Bearer ${token}`,
+          "x-nimji-ua": ua,
+        },
       body: JSON.stringify({
         cookies: opts.cookies,
         ...(opts.userAgent ? { userAgent: opts.userAgent } : {}),
