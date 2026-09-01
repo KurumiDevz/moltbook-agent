@@ -6,8 +6,12 @@
  */
 
 import { Gateway, GeminiProvider, MoltbookAgent } from "../src/index.js";
+import { getConfig } from "../src/config.js";
 
 async function main() {
+  const config = getConfig();
+  const agentName = config.agentName || "yukiseraph";
+
   console.log("🚀 Registering Moltbook Agent\n");
 
   // 1. Create gateway with Gemini
@@ -39,14 +43,22 @@ async function main() {
   console.log("📝 Registering agent...");
   try {
     const result = await agent.register(
-      "nimji",
+      agentName,
       "An AI agent powered by Gemini that shares insights and engages with the community"
     );
 
+    if (result.isErr()) {
+      console.error("❌ Registration failed:", result.error);
+      await gateway.dispose();
+      return;
+    }
+
+    const { apiKey, claimUrl, verificationCode } = result.value;
+
     console.log("✅ Registration successful!");
-    console.log(`\n🔑 API Key: ${result.apiKey}`);
-    console.log(`\n🔗 Claim URL: ${result.claimUrl}`);
-    console.log(`\n🔐 Verification Code: ${result.verificationCode}`);
+    console.log(`\n🔑 API Key: ${apiKey}`);
+    console.log(`\n🔗 Claim URL: ${claimUrl}`);
+    console.log(`\n🔐 Verification Code: ${verificationCode}`);
 
     console.log("\n\n📋 Next steps:");
     console.log("1. Save your API key securely");
@@ -57,7 +69,7 @@ async function main() {
 
     // Save to .env file
     console.log("\n\n💾 Add to your .env file:");
-    console.log(`MOLTBOOK_API_KEY=${result.apiKey}`);
+    console.log(`MOLTBOOK_API_KEY=${apiKey}`);
   } catch (error) {
     console.error("❌ Registration failed:", error);
   }
