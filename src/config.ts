@@ -68,6 +68,8 @@ export type AgentConfig = {
   keepaliveIntervalMs: number;
   /** Interval between full refresh cycles — extractTokens + browserinfo + RotateCookies (default: 1200000 = 20 min) */
   refreshIntervalMs: number;
+  /** Enable browserinfo keepalive ping (default: true) */
+  enableBrowserinfo: boolean;
 };
 
 export type BlockedPosts = {
@@ -105,6 +107,7 @@ const AGENT_DEFAULTS: AgentConfig = {
   maxCommentsPerDay: 50,
   keepaliveIntervalMs: 120_000,    // 2 min — browserinfo ping
   refreshIntervalMs: 1_200_000,    // 20 min — full refresh cycle
+  enableBrowserinfo: true,
 };
 
 const BLOCKED_DEFAULTS: BlockedPosts = {
@@ -157,6 +160,7 @@ export function getConfig(): AgentConfig {
     if (process.env.BARD_UTILS_URL) _config.bardUtilsUrl = process.env.BARD_UTILS_URL;
     if (process.env.KEEPALIVE_INTERVAL_MS) _config.keepaliveIntervalMs = Number(process.env.KEEPALIVE_INTERVAL_MS) || 120_000;
     if (process.env.REFRESH_INTERVAL_MS) _config.refreshIntervalMs = Number(process.env.REFRESH_INTERVAL_MS) || 1_200_000;
+    if (process.env.ENABLE_BROWSERINFO) _config.enableBrowserinfo = process.env.ENABLE_BROWSERINFO !== "false";
   }
   return _config;
 }

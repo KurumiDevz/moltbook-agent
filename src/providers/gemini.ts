@@ -187,6 +187,7 @@ export class GeminiProvider implements Provider {
   private refreshTimer: ReturnType<typeof setInterval> | null = null;
   private keepaliveIntervalMs: number = 120_000;    // 2 min — browserinfo ping
   private refreshIntervalMs: number = 1_200_000;   // 20 min — full refresh cycle
+  private enableBrowserinfo: boolean = true;
   private effectiveCookies: string = "";
   private effectiveFSid: string = "";
   private effectiveAtToken: string = "";
@@ -211,6 +212,7 @@ export class GeminiProvider implements Provider {
     this.proxyManager = (config.options?.proxyManager as ProxyManager) ?? null;
     this.keepaliveIntervalMs = (config.options?.keepaliveIntervalMs as number) ?? 120_000;
     this.refreshIntervalMs = (config.options?.refreshIntervalMs as number) ?? 1_200_000;
+    this.enableBrowserinfo = (config.options?.enableBrowserinfo as boolean) ?? true;
 
     // Load cookies: prefer saved (fresh) from gemini-session.json, fall back to .env
     const savedCookies = loadCookies();
@@ -278,28 +280,30 @@ export class GeminiProvider implements Provider {
     // This is NOT nimji's keepalive — nimji handles per-request cookie rotation.
     // This calls POST /api/browserinfo on bard-utils, which hits
     // myaccount.google.com/_/AccountSettingsUi/browserinfo.
-    this.keepaliveTimer = setInterval(async () => {
-      try {
-        const token = await this.getToken();
-        if (!token) {
-          console.log("[keepalive] failed to get auth token");
-          return;
-        }
+    if (this.enableBrowserinfo) {
+      this.keepaliveTimer = setInterval(async () => {
+        try {
+          const token = await this.getToken();
+          if (!token) {
+            console.log("[keepalive] failed to get auth token");
+            return;
+          }
 
-        const updatedCookies = await browserinfoKeepalive({
-          cookies: this.effectiveCookies,
-          baseUrl: this.bardUtilsUrl,
-          token,
-          fetchFn: this.getProxyFetch(),
-        });
-        if (updatedCookies) {
-          this.effectiveCookies = updatedCookies;
-          saveCookies({ cookies: updatedCookies });
+          const updatedCookies = await browserinfoKeepalive({
+            cookies: this.effectiveCookies,
+            baseUrl: this.bardUtilsUrl,
+            token,
+            fetchFn: this.getProxyFetch(),
+          });
+          if (updatedCookies) {
+            this.effectiveCookies = updatedCookies;
+            saveCookies({ cookies: updatedCookies });
+          }
+        } catch (err) {
+          console.log("[keepalive] browserinfo keepalive error:", err);
         }
-      } catch (err) {
-        console.log("[keepalive] browserinfo keepalive error:", err);
-      }
-    }, this.keepaliveIntervalMs);
+      }, this.keepaliveIntervalMs);
+    }
 
     // ── Full refresh (every 20 min) ──
     // Calls POST /api/refresh: extractTokens + browserinfo + RotateCookies.

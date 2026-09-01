@@ -91,6 +91,7 @@ async function main() {
     bardUtilsUrl,
     keepaliveIntervalMs: config.keepaliveIntervalMs,
     refreshIntervalMs: config.refreshIntervalMs,
+    enableBrowserinfo: config.enableBrowserinfo,
     ...(proxyManager ? { proxyManager } : {}),
   } });
 
