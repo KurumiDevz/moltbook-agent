@@ -9,7 +9,7 @@ import { http } from "./http/index.js";
 
 import { ok, err, type Result } from "./util/index.js";
 import { MoltbookApiError } from "./util/index.js";
-import type { Post, Comment, HomeData, FollowingPost, AgentProfile, Submolt } from "./types.js";
+import type { Post, Comment, HomeData, FollowingPost, AgentProfile, Submolt, FeedPost } from "./types.js";
 
 /** Moltbook API configuration */
 export type MoltbookConfig = {
@@ -57,6 +57,18 @@ export type PostResponse = {
   readonly createdAt: string;
 };
 
+/** Post returned from a profile's recentPosts array. */
+type ProfilePost = {
+  id: string;
+  title: string;
+  content_preview: string;
+  upvotes: number;
+  downvotes: number;
+  comment_count: number;
+  created_at: string;
+  submolt: { name: string };
+};
+
 /**
  * Moltbook agent client.
  */
@@ -94,6 +106,7 @@ export class MoltbookAgent {
 
   /**
    * Register the agent on Moltbook.
+   * NOTE: Raw http() is intentional — registration has no API key yet.
    */
   async register(
     name: string,
@@ -138,15 +151,10 @@ export class MoltbookAgent {
    * Check agent status.
    */
   async getStatus(): Promise<Result<{ status: string; name?: string; karma?: number }, MoltbookApiError>> {
-    const { status, data } = await http(`${this.baseUrl}/agents/status`, {
-      headers: { Authorization: `Bearer ${this.apiKey}` },
-    });
+    const result = await this.request<Record<string, unknown>>("GET", "/agents/status");
+    if (!result.ok) return err(result.error);
 
-    if (status >= 400) {
-      return err(new MoltbookApiError(`Status check failed: ${status}`, status, data));
-    }
-
-    const resp = data as Record<string, unknown>;
+    const resp = result.value;
     const agent = (resp.agent ?? {}) as Record<string, unknown>;
     return ok({
       status: (resp.status ?? "unknown") as string,
@@ -168,30 +176,18 @@ export class MoltbookAgent {
     if (options.url) body.url = options.url;
     if (options.type) body.type = options.type;
 
-    const doCreate = () =>
-      http(`${this.baseUrl}/posts`, {
-        method: "POST",
-        headers: {
-          Authorization: `Bearer ${this.apiKey}`,
-          "Content-Type": "application/json",
-        },
-        body,
-      });
+    let result = await this.request<Record<string, unknown>>("POST", "/posts", body);
 
-    let { status, data } = await doCreate();
-
-    if (status === 429) {
+    if (!result.ok && result.error.status === 429) {
       const retryAfter = 5_000;
       await new Promise((r) => setTimeout(r, retryAfter));
-      ({ status, data } = await doCreate());
+      result = await this.request<Record<string, unknown>>("POST", "/posts", body);
     }
 
-    if (status >= 400) {
-      return err(new MoltbookApiError(`Post creation failed: ${status}`, status, data));
-    }
+    if (!result.ok) return err(result.error);
 
     // Handle nested post object in response
-    const resp = data as Record<string, unknown>;
+    const resp = result.value;
     const postData = (resp.post ?? resp) as Record<string, unknown>;
 
     return ok({
@@ -254,6 +250,8 @@ Output only the post content, no meta-commentary.`;
 
   /**
    * Get feed from Moltbook.
+   * Returns normalized FeedPost[] — field names match the shared type,
+   * no extra mapping needed at the call site.
    */
   async getFeed(options?: {
     sort?: "hot" | "new" | "top" | "rising";
@@ -263,17 +261,7 @@ Output only the post content, no meta-commentary.`;
   }): Promise<
     Result<
       {
-        posts: Array<{
-          id: string;
-          title: string;
-          content?: string;
-          url?: string;
-          submolt: string;
-          author: string;
-          votes: number;
-          commentCount: number;
-          createdAt: string;
-        }>;
+        posts: FeedPost[];
         hasMore: boolean;
         nextCursor?: string;
       },
@@ -286,28 +274,22 @@ Output only the post content, no meta-commentary.`;
     if (options?.limit) params.set("limit", String(options.limit));
     if (options?.cursor) params.set("cursor", options.cursor);
 
-    const { status, data } = await http(`${this.baseUrl}/posts?${params}`, {
-      headers: { Authorization: `Bearer ${this.apiKey}` },
-    });
+    const result = await this.request<Record<string, unknown>>("GET", `/posts?${params}`);
+    if (!result.ok) return err(result.error);
 
-    if (status >= 400) {
-      return err(new MoltbookApiError(`Feed fetch failed: ${status}`, status, data));
-    }
-
-    const resp = data as Record<string, unknown>;
+    const resp = result.value;
     const rawPosts = (resp.posts ?? []) as Array<Record<string, unknown>>;
-    const posts = rawPosts.map((p) => {
+    const posts: FeedPost[] = rawPosts.map((p) => {
       const author = p.author as Record<string, unknown> | undefined;
       const submolt = p.submolt as Record<string, unknown> | undefined;
       return {
         id: (p.id ?? "") as string,
         title: (p.title ?? "") as string,
-        content: (p.content ?? "") as string,
-        url: (p.url ?? "") as string,
+        content: (p.content ?? undefined) as string | undefined,
         submolt: (submolt?.name ?? p.submolt_name ?? "") as string,
         author: (author?.name ?? p.author_name ?? "") as string,
-        votes: ((p.upvotes as number) ?? 0) - ((p.downvotes as number) ?? 0),
-        commentCount: (p.comment_count as number) ?? 0,
+        upvotes: ((p.upvotes as number) ?? 0) - ((p.downvotes as number) ?? 0),
+        comment_count: (p.comment_count as number) ?? 0,
         createdAt: (p.created_at ?? "") as string,
       };
     });
@@ -354,20 +336,10 @@ Output only the post content, no meta-commentary.`;
     const body: Record<string, string> = { content };
     if (parentId) body.parent_id = parentId;
 
-    const { status, data } = await http(`${this.baseUrl}/posts/${postId}/comments`, {
-      method: "POST",
-      headers: {
-        Authorization: `Bearer ${this.apiKey}`,
-        "Content-Type": "application/json",
-      },
-      body,
-    });
+    const result = await this.request<Record<string, unknown>>("POST", `/posts/${postId}/comments`, body);
+    if (!result.ok) return err(result.error);
 
-    if (status >= 400) {
-      return err(new MoltbookApiError(`Comment failed: ${status}`, status, data));
-    }
-
-    const resp = data as Record<string, unknown>;
+    const resp = result.value;
     const comment = (resp.comment ?? resp) as Record<string, unknown>;
     return ok({
       id: (comment.id ?? "") as string,
@@ -380,15 +352,8 @@ Output only the post content, no meta-commentary.`;
    */
   async vote(postId: string, direction: "up" | "down"): Promise<Result<void, MoltbookApiError>> {
     const endpoint = direction === "up" ? "upvote" : "downvote";
-    const { status, data } = await http(`${this.baseUrl}/posts/${postId}/${endpoint}`, {
-      method: "POST",
-      headers: { Authorization: `Bearer ${this.apiKey}` },
-    });
-
-    if (status >= 400) {
-      return err(new MoltbookApiError(`Vote failed: ${status}`, status, data));
-    }
-    return ok(undefined as void);
+    const result = await this.request<unknown>("POST", `/posts/${postId}/${endpoint}`);
+    return result.ok ? ok(undefined as void) : err(result.error);
   }
 
   /**
@@ -405,20 +370,10 @@ Output only the post content, no meta-commentary.`;
       MoltbookApiError
     >
   > {
-    const { status, data } = await http(`${this.baseUrl}/agents/me`, {
-      method: "PATCH",
-      headers: {
-        Authorization: `Bearer ${this.apiKey}`,
-        "Content-Type": "application/json",
-      },
-      body: updates,
-    });
+    const result = await this.request<Record<string, unknown>>("PATCH", "/agents/me", updates);
+    if (!result.ok) return err(result.error);
 
-    if (status >= 400) {
-      return err(new MoltbookApiError(`Profile update failed: ${status}`, status, data));
-    }
-
-    const resp = data as Record<string, unknown>;
+    const resp = result.value;
     const agent = (resp.agent ?? resp) as Record<string, unknown>;
     return ok({
       id: (agent.id ?? "") as string,
@@ -444,15 +399,10 @@ Output only the post content, no meta-commentary.`;
       MoltbookApiError
     >
   > {
-    const { status, data } = await http(`${this.baseUrl}/agents/profile?name=${name}`, {
-      headers: { Authorization: `Bearer ${this.apiKey}` },
-    });
+    const result = await this.request<Record<string, unknown>>("GET", `/agents/profile?name=${name}`);
+    if (!result.ok) return err(result.error);
 
-    if (status >= 400) {
-      return err(new MoltbookApiError(`Profile fetch failed: ${status}`, status, data));
-    }
-
-    const resp = data as Record<string, unknown>;
+    const resp = result.value;
     const agent = (resp.agent ?? resp) as Record<string, unknown>;
     return ok({
       id: (agent.id ?? "") as string,
@@ -473,110 +423,60 @@ Output only the post content, no meta-commentary.`;
   ): Promise<Result<PostResponse, MoltbookApiError>> {
     // Note: Moltbook does not currently support post editing via API
     // This is a placeholder for future functionality
-    const { status, data } = await http(`${this.baseUrl}/posts/${postId}`, {
-      method: "PATCH",
-      headers: {
-        Authorization: `Bearer ${this.apiKey}`,
-        "Content-Type": "application/json",
-      },
-      body: updates,
-    });
+    const result = await this.request<Record<string, unknown>>("PATCH", `/posts/${postId}`, updates);
+    if (!result.ok) return err(result.error);
 
-    if (status >= 400) {
-      return err(new MoltbookApiError(`Post edit failed: ${status}`, status, data));
-    }
-
-    return ok(data as PostResponse);
+    return ok(result.value as unknown as PostResponse);
   }
 
   /**
    * Delete a post.
    */
   async deletePost(postId: string): Promise<Result<void, MoltbookApiError>> {
-    const { status, data } = await http(`${this.baseUrl}/posts/${postId}`, {
-      method: "DELETE",
-      headers: { Authorization: `Bearer ${this.apiKey}` },
-    });
-
-    if (status >= 400) {
-      return err(new MoltbookApiError(`Post delete failed: ${status}`, status, data));
-    }
-    return ok(undefined as void);
+    const result = await this.request<unknown>("DELETE", `/posts/${postId}`);
+    return result.ok ? ok(undefined as void) : err(result.error);
   }
 
   /**
    * Delete a comment.
    */
   async deleteComment(commentId: string): Promise<Result<void, MoltbookApiError>> {
-    const { status, data } = await http(`${this.baseUrl}/comments/${commentId}`, {
-      method: "DELETE",
-      headers: { Authorization: `Bearer ${this.apiKey}` },
-    });
-
-    if (status >= 400) {
-      return err(new MoltbookApiError(`Comment delete failed: ${status}`, status, data));
-    }
-    return ok(undefined as void);
+    const result = await this.request<unknown>("DELETE", `/comments/${commentId}`);
+    return result.ok ? ok(undefined as void) : err(result.error);
   }
 
   /**
    * Subscribe to a submolt.
    */
   async subscribe(submoltName: string): Promise<Result<void, MoltbookApiError>> {
-    const { status, data } = await http(`${this.baseUrl}/submolts/${submoltName}/subscribe`, {
-      method: "POST",
-      headers: { Authorization: `Bearer ${this.apiKey}` },
-    });
-
-    if (status >= 400) {
-      return err(new MoltbookApiError(`Subscribe failed: ${status}`, status, data));
-    }
-    return ok(undefined as void);
+    const result = await this.request<unknown>("POST", `/submolts/${submoltName}/subscribe`);
+    return result.ok ? ok(undefined as void) : err(result.error);
   }
 
   /**
    * Follow another agent.
    */
   async follow(agentName: string): Promise<Result<void, MoltbookApiError>> {
-    const { status, data } = await http(`${this.baseUrl}/agents/${agentName}/follow`, {
-      method: "POST",
-      headers: { Authorization: `Bearer ${this.apiKey}` },
-    });
-
-    if (status >= 400) {
-      return err(new MoltbookApiError(`Follow failed: ${status}`, status, data));
-    }
-    return ok(undefined as void);
+    const result = await this.request<unknown>("POST", `/agents/${agentName}/follow`);
+    return result.ok ? ok(undefined as void) : err(result.error);
   }
 
   /**
    * Unfollow another agent.
    */
   async unfollow(agentName: string): Promise<Result<void, MoltbookApiError>> {
-    const { status, data } = await http(`${this.baseUrl}/agents/${agentName}/unfollow`, {
-      method: "POST",
-      headers: { Authorization: `Bearer ${this.apiKey}` },
-    });
-
-    if (status >= 400) {
-      return err(new MoltbookApiError(`Unfollow failed: ${status}`, status, data));
-    }
-    return ok(undefined as void);
+    const result = await this.request<unknown>("POST", `/agents/${agentName}/unfollow`);
+    return result.ok ? ok(undefined as void) : err(result.error);
   }
 
   // ─── SDK methods (comprehensive API coverage) ──────────────────────
 
   /** Get home dashboard (recommended first call each session) */
   async getHome(): Promise<Result<HomeData, MoltbookApiError>> {
-    const { status, data } = await http(`${this.baseUrl}/home`, {
-      headers: { Authorization: `Bearer ${this.apiKey}` },
-    });
+    const result = await this.request<Record<string, unknown>>("GET", "/home");
+    if (!result.ok) return err(result.error);
 
-    if (status >= 400) {
-      return err(new MoltbookApiError(`Home fetch failed: ${status}`, status, data));
-    }
-
-    const resp = data as Record<string, unknown>;
+    const resp = result.value;
     const account = (resp.your_account ?? {}) as Record<string, unknown>;
     const followFeed = (resp.posts_from_accounts_you_follow ?? {}) as Record<string, unknown>;
     const rawFollowingPosts = (followFeed.posts ?? []) as Array<Record<string, unknown>>;
@@ -668,25 +568,13 @@ Output only the post content, no meta-commentary.`;
   }
 
   /** Get own posts via the agent profile endpoint (the /posts?author= filter is broken). */
-  async getMyPosts(agentName: string): Promise<
-    Result<
-      Array<{
-        id: string;
-        title: string;
-        content_preview: string;
-        upvotes: number;
-        downvotes: number;
-        comment_count: number;
-        created_at: string;
-        submolt: { name: string };
-      }>,
-      MoltbookApiError
-    >
-  > {
-    const result = await this.request("GET", `/agents/profile?name=${encodeURIComponent(agentName)}`);
-    if (!result.ok) return result as any;
-    const profile = result.value as Record<string, unknown>;
-    const posts = (profile.recentPosts ?? []) as any[];
+  async getMyPosts(agentName: string): Promise<Result<ProfilePost[], MoltbookApiError>> {
+    const result = await this.request<Record<string, unknown>>("GET", `/agents/profile?name=${encodeURIComponent(agentName)}`);
+    if (!result.ok) return err(result.error);
+
+    const resp = result.value;
+    const profile = (resp.agent ?? resp) as Record<string, unknown>;
+    const posts = (profile.recentPosts ?? []) as ProfilePost[];
     return ok(posts);
   }
 
@@ -721,15 +609,10 @@ Output only the post content, no meta-commentary.`;
 
   /** Get your own profile */
   async getMe(): Promise<Result<AgentProfile, MoltbookApiError>> {
-    const { status, data } = await http(`${this.baseUrl}/agents/me`, {
-      headers: { Authorization: `Bearer ${this.apiKey}` },
-    });
+    const result = await this.request<Record<string, unknown>>("GET", "/agents/me");
+    if (!result.ok) return err(result.error);
 
-    if (status >= 400) {
-      return err(new MoltbookApiError(`Profile fetch failed: ${status}`, status, data));
-    }
-
-    const resp = data as Record<string, unknown>;
+    const resp = result.value;
     const a = (resp.agent ?? resp) as Record<string, unknown>;
     return ok({
       id: (a.id ?? "") as string,
@@ -843,7 +726,13 @@ export function createMoltbookAgent(gateway: Gateway, config?: MoltbookConfig): 
 
 /**
  * Create a Moltbook SDK instance (MoltbookAgent without gateway dependency).
+ * Used by scripts that only call read-only API methods (no LLM generation).
  */
 export function createMoltbookSDK(apiKey: string): MoltbookAgent {
-  return new MoltbookAgent(null as unknown as Gateway, { apiKey });
+  const noopGateway = {
+    generate: () => {
+      throw new Error("SDK mode: LLM gateway not configured — only read-only API methods are available");
+    },
+  } as unknown as Gateway;
+  return new MoltbookAgent(noopGateway, { apiKey });
 }

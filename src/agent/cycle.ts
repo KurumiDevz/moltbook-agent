@@ -11,7 +11,7 @@ import { BrainV2 } from "../brain/index.js";
 import { runSubAgentTask } from "../sub-agent.js";
 import { SummaryGenerator } from "../summary.js";
 import { shouldRotateConversation, deleteConversation, cleanupOldPostConversations } from "../session-manager.js";
-import type { AgentDecision, ExecutionResult, ScoredPost, ActivitySummary } from "../types.js";
+import type { AgentDecision, ExecutionResult, ScoredPost, ActivitySummary, FeedPost, NotificationItem, TaskQueueItem } from "../types.js";
 import type { MemoryState } from "./types.js";
 import { getRateLimits, recordForeignStance } from "./helpers.js";
 import { fetchFeed, fetchHome, fetchRelevantPosts, fetchNotifications, fetchCommentThreads } from "./context.js";
@@ -21,43 +21,44 @@ import { saveMyPost } from "./my-posts.js";
 
 // ── Hard-blocked posts ─────────────────────────────────────────────
 
-const BLOCKED_POST_IDS = new Set(getBlocked().blockedPostIds);
-
 const MAX_COMMENTS_PER_POST = getConfig().maxCommentsPerPost;
 
 // ── Feed filtering ─────────────────────────────────────────────────
 
 /** Purge blocked posts from feed, home activity, and memory stances. */
 function purgeBlocked(
-  rawFeed: any[],
-  relevantPosts: any[],
-  home: { activity: any[] },
+  rawFeed: FeedPost[],
+  relevantPosts: FeedPost[],
+  home: { activity: { post_id: string }[] },
   memory: MemoryState,
 ): void {
+  const blockedIds = new Set(getBlocked().blockedPostIds);
+
   for (const feedArr of [rawFeed, relevantPosts]) {
     for (let i = feedArr.length - 1; i >= 0; i--) {
-      if (BLOCKED_POST_IDS.has(feedArr[i].id)) feedArr.splice(i, 1);
+      if (blockedIds.has(feedArr[i].id)) feedArr.splice(i, 1);
     }
   }
   for (const h of home.activity) {
-    if (BLOCKED_POST_IDS.has(h.post_id)) h.post_id = "";
+    if (blockedIds.has(h.post_id)) h.post_id = "";
   }
-  memory.stances = memory.stances.filter((s) => !BLOCKED_POST_IDS.has(s.source));
-  memory.foreignStances = memory.foreignStances.filter((s) => !BLOCKED_POST_IDS.has(s.context));
+  memory.stances = memory.stances.filter((s) => !blockedIds.has(s.source));
+  memory.foreignStances = memory.foreignStances.filter((s) => !blockedIds.has(s.context));
 }
 
 /** Filter notifications: blocked, already-replied, self, stochastic per-thread cap. */
 const SPAM_KEYWORDS = ["DEUSPROOF", "crypto", "proof of", "airdrop", "send wallet", "DM me"];
 
-function isSpamNotification(n: any): boolean {
+function isSpamNotification(n: NotificationItem): boolean {
   const text = (n.message ?? "").toLowerCase() + " " + (n.commentContent ?? "").toLowerCase();
   return SPAM_KEYWORDS.some((kw) => text.includes(kw.toLowerCase()));
 }
 
-function filterNotifications(allNotifications: any[], memory: MemoryState): { kept: any[]; spamPostIds: string[] } {
+function filterNotifications(allNotifications: NotificationItem[], memory: MemoryState): { kept: NotificationItem[]; spamPostIds: string[] } {
+  const blockedIds = new Set(getBlocked().blockedPostIds);
   const spamPostIds: string[] = [];
   const kept = allNotifications.filter((n) => {
-    if (n.postId && BLOCKED_POST_IDS.has(n.postId)) return false;
+    if (n.postId && blockedIds.has(n.postId)) return false;
 
     // Spam filter: block AND collect for mark-as-read
     if (isSpamNotification(n)) {
@@ -85,7 +86,7 @@ function filterNotifications(allNotifications: any[], memory: MemoryState): { ke
 }
 
 /** Merge feed + semantic search, deduplicate, remove capped posts. */
-function mergeAndCapFeed(rawFeed: any[], relevantPosts: any[], memory: MemoryState): any[] {
+function mergeAndCapFeed(rawFeed: FeedPost[], relevantPosts: FeedPost[], memory: MemoryState): FeedPost[] {
   const seenIds = new Set(rawFeed.map((p) => p.id));
   for (const p of relevantPosts) {
     if (!seenIds.has(p.id)) {
@@ -106,10 +107,10 @@ function mergeAndCapFeed(rawFeed: any[], relevantPosts: any[], memory: MemorySta
 // ── Sub-agent scoring ──────────────────────────────────────────────
 
 async function scoreFeed(
-  rawFeed: any[],
+  rawFeed: FeedPost[],
   gateway: Gateway,
   subAgentModel: string,
-): Promise<any[]> {
+): Promise<FeedPost[]> {
   try {
     const task = {
       type: "score_feed" as const,
@@ -126,22 +127,46 @@ async function scoreFeed(
       prompt: "",
     };
     const scored = await runSubAgentTask(task, (opts) => gateway.generate({ ...opts, conversationKey: "sub-score" }), subAgentModel);
-    return (scored as { type: "scored_feed"; posts: ScoredPost[] }).posts.map((p) => ({
-      id: p.id,
-      title: p.title,
-      content: p.content,
-      submolt: p.submolt,
-      author: p.author,
-      upvotes: p.upvotes,
-      comment_count: p.comment_count,
-      createdAt: "",
-    }));
+
+    // Type guard: ensure scored result has the expected shape before accessing .posts
+    if (
+      scored != null &&
+      typeof scored === "object" &&
+      "posts" in scored &&
+      Array.isArray((scored as { posts: unknown }).posts)
+    ) {
+      const posts = (scored as { posts: ScoredPost[] }).posts;
+      return posts.map((p) => ({
+        id: p.id,
+        title: p.title,
+        content: p.content,
+        submolt: p.submolt,
+        author: p.author,
+        upvotes: p.upvotes,
+        comment_count: p.comment_count,
+        createdAt: "",
+      }));
+    }
+    return rawFeed;
   } catch {
     return rawFeed;
   }
 }
 
 // ── Main cycle function ────────────────────────────────────────────
+
+/** Map a decision action to a task queue type. */
+function decisionActionToTaskType(action: string): TaskQueueItem["type"] {
+  switch (action) {
+    case "post": return "post";
+    case "comment": return "comment";
+    case "reply_to_comment": return "comment";
+    case "join_conversation": return "comment";
+    case "upvote": return "upvote";
+    case "follow": return "follow";
+    default: return "engage";
+  }
+}
 
 export interface CycleDeps {
   moltbookAgent: MoltbookAgent;
@@ -368,31 +393,17 @@ export async function runCycle(deps: CycleDeps): Promise<CycleResult> {
     console.log(`   ⚡ Executing: ${decision.action} — ${decision.reason}`);
 
     // Add task to queue
+    const taskType = decisionActionToTaskType(decision.action);
+    const taskTarget =
+      decision.action === "post" ? decision.topic
+        : decision.action === "follow" ? decision.agentName
+          : "postId" in decision ? decision.postId
+            : undefined;
     const task = summaryGen.addTask(
       memory.taskQueue,
-      decision.action === "post"
-        ? "post"
-        : decision.action === "comment"
-          ? "comment"
-          : decision.action === "reply_to_comment" || decision.action === "join_conversation"
-            ? "comment"
-            : decision.action === "upvote"
-              ? "upvote"
-              : decision.action === "follow"
-                ? "follow"
-                : "engage",
+      taskType,
       decision.reason,
-      decision.action === "post"
-        ? decision.topic
-        : decision.action === "comment"
-          ? decision.postId
-          : decision.action === "reply_to_comment" || decision.action === "join_conversation"
-            ? decision.postId
-            : decision.action === "upvote"
-              ? decision.postId
-              : decision.action === "follow"
-                ? decision.agentName
-                : undefined,
+      taskTarget,
     );
 
     // Execute

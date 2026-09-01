@@ -16,16 +16,7 @@ import { getConfig } from "../config.js";
 export async function fetchFeed(moltbookAgent: MoltbookAgent): Promise<FeedPost[]> {
   try {
     const { posts } = (await moltbookAgent.getFeed({ sort: "hot", limit: 15 })).unwrap();
-    return posts.map((p) => ({
-      id: p.id,
-      title: p.title,
-      content: p.content,
-      submolt: p.submolt,
-      author: p.author,
-      upvotes: p.votes,
-      comment_count: p.commentCount,
-      createdAt: p.createdAt,
-    }));
+    return posts;
   } catch {
     return [];
   }

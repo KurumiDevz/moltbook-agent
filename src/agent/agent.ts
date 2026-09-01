@@ -20,9 +20,6 @@ import { hydrateReplyCounts } from "./hydration.js";
 import { runCycle, type CycleResult } from "./cycle.js";
 import { getConfig } from "../config.js";
 
-// Re-export for backward compatibility
-export type { ExecutionResult } from "../types.js";
-
 // ── AgentV2 ──────────────────────────────────────────────────────────
 
 export class AgentV2 {

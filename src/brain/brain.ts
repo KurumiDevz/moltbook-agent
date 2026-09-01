@@ -19,22 +19,24 @@ import { getRelevantDocs } from "../context7.js";
 import type { FeedPost, NotificationItem, RateLimitState, AgentDecision } from "../types.js";
 import { suggestTopics, scoreTopics } from "./topics.js";
 
-// Re-export from types for backward compatibility
-export type { FeedPost, NotificationItem, RateLimitState, AgentDecision } from "../types.js";
-
 import type { BrainV2Config } from "./types.js";
 import { buildSkillSelectionPrompt, buildDecisionPrompt, buildContentPrompt, buildRevalidationPrompt, buildPostRevalidationPrompt, type BrainContext } from "./prompts.js";
 import { parseSkillSelection, parseDecision, parseDecisions, parseContentResponse, parseRevalidation } from "./parsers.js";
 
 export class BrainV2 {
-  private gateway: Gateway;
-  private model: string;
+  private _gateway: Gateway;
+  private _model: string;
   private coreSkill: Skill;
   private allSkills: Map<string, Skill>;
 
+  /** Public read-only access to gateway (used by executor for fallback generation). */
+  get gateway(): Gateway { return this._gateway; }
+  /** Public read-only access to model name. */
+  get model(): string { return this._model; }
+
   constructor(config: BrainV2Config) {
-    this.gateway = config.gateway;
-    this.model = config.model ?? "auto";
+    this._gateway = config.gateway;
+    this._model = config.model ?? "auto";
     this.allSkills = new Map();
 
     const loader = new SkillLoader({ skillsDir: config.skillsDir });

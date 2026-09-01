@@ -150,9 +150,9 @@ async function executePost(
 
   if (!title || !content) {
     // Fallback: generate via gateway
-    const result = await brain["gateway"].generate({
+    const result = await brain.gateway.generate({
       prompt: `Write a Moltbook post about "${decision.topic}" for /m/${decision.submolt}. Type: ${decision.postType}. 150-300 words. Be specific. Output as:\nTITLE: short title\nBODY: post content`,
-      model: brain["model"],
+      model: brain.model,
       maxTokens: 4000,
     });
     const parsed = parseTitleBody(result.text);
@@ -271,25 +271,27 @@ async function executeComment(
   return { success: true, action: "comment", message: `Commented on ${decision.postId}`, karmaDelta: 1 };
 }
 
-// ── Reply to comment ───────────────────────────────────────────────
+// ── Comment reply (shared by reply_to_comment + join_conversation) ──
 
-async function executeReplyToComment(
-  decision: Extract<AgentDecision, { action: "reply_to_comment" }>,
+/** Shared implementation for reply-to-comment and join-conversation actions. */
+async function executeCommentReply(
+  decision: { postId: string; commentId: string; content: string },
   deps: { moltbookAgent: MoltbookAgent; gateway: Gateway; brain: BrainV2; memory: MemoryState },
+  opts: { actionLabel: string; stanceTopic: string; successMessage: string },
 ): Promise<ExecutionResult> {
   const { moltbookAgent, gateway, memory } = deps;
 
   if (!getRateLimits(memory).canComment) {
-    return { success: false, action: "reply_to_comment", message: "Rate limited — cannot comment yet" };
+    return { success: false, action: opts.actionLabel, message: "Rate limited — cannot comment yet" };
   }
 
   if (!decision.content) {
-    return { success: false, action: "reply_to_comment", message: "No reply content provided" };
+    return { success: false, action: opts.actionLabel, message: "No reply content provided" };
   }
 
   // Validate commentId exists before replying — AI sometimes hallucinates IDs from mention notifications
   if (decision.commentId && memory.repliedCommentIds.has(decision.commentId)) {
-    return { success: false, action: "reply_to_comment", message: "Already replied to this comment" };
+    return { success: false, action: opts.actionLabel, message: "Already replied to this comment" };
   }
 
   // Hard guard: minimum word count — retry expansion in fresh conversation
@@ -302,7 +304,7 @@ async function executeReplyToComment(
       content = expanded;
       console.log(`   Expanded to ${content.split(/\s+/).length} words`);
     } else {
-      return { success: false, action: "reply_to_comment", message: `Reply too short (${replyWordCount} words, min ${getConfig().minReplyWords}) — expansion failed, skipping` };
+      return { success: false, action: opts.actionLabel, message: `Reply too short (${replyWordCount} words, min ${getConfig().minReplyWords}) — expansion failed, skipping` };
     }
   }
 
@@ -312,7 +314,7 @@ async function executeReplyToComment(
   if (!replyResult.ok) {
     // Track as replied so we never retry a deleted/gone comment
     if (decision.commentId) memory.repliedCommentIds.add(decision.commentId);
-    return { success: false, action: "reply_to_comment", message: `Reply failed (${replyResult.error.status}): comment may have been deleted` };
+    return { success: false, action: opts.actionLabel, message: `Reply failed (${replyResult.error.status}): comment may have been deleted` };
   }
 
   memory.totalComments++;
@@ -321,7 +323,7 @@ async function executeReplyToComment(
 
   // Record stance — what position did this reply take?
   memory.stances.push({
-    topic: `reply to ${decision.commentId}`,
+    topic: opts.stanceTopic,
     position: content.slice(0, 100),
     context: content.slice(0, 300),
     source: "reply",
@@ -340,17 +342,30 @@ async function executeReplyToComment(
   memory.repliedThreadCounts.set(decision.commentId, threadCount + 1);
 
   // Mark notifications as read for the post we replied on (best effort)
-  const replyMarkResult = await moltbookAgent.markNotificationsRead(decision.postId);
-  if (!replyMarkResult.ok) {
-    console.log(`   ⚠ markNotificationsRead failed: ${replyMarkResult.error.status} ${String(replyMarkResult.error.responseBody).slice(0, 200)}`);
+  const markResult = await moltbookAgent.markNotificationsRead(decision.postId);
+  if (!markResult.ok) {
+    console.log(`   ⚠ markNotificationsRead failed: ${markResult.error.status} ${String(markResult.error.responseBody).slice(0, 200)}`);
   }
 
   return {
     success: true,
-    action: "reply_to_comment",
-    message: `Replied to comment ${decision.commentId} on post ${decision.postId}`,
+    action: opts.actionLabel,
+    message: opts.successMessage,
     karmaDelta: 1,
   };
+}
+
+// ── Reply to comment ───────────────────────────────────────────────
+
+async function executeReplyToComment(
+  decision: Extract<AgentDecision, { action: "reply_to_comment" }>,
+  deps: { moltbookAgent: MoltbookAgent; gateway: Gateway; brain: BrainV2; memory: MemoryState },
+): Promise<ExecutionResult> {
+  return executeCommentReply(decision, deps, {
+    actionLabel: "reply_to_comment",
+    stanceTopic: `reply to ${decision.commentId}`,
+    successMessage: `Replied to comment ${decision.commentId} on post ${decision.postId}`,
+  });
 }
 
 // ── Join conversation ──────────────────────────────────────────────
@@ -359,79 +374,11 @@ async function executeJoinConversation(
   decision: Extract<AgentDecision, { action: "join_conversation" }>,
   deps: { moltbookAgent: MoltbookAgent; gateway: Gateway; brain: BrainV2; memory: MemoryState },
 ): Promise<ExecutionResult> {
-  const { moltbookAgent, gateway, memory } = deps;
-
-  if (!getRateLimits(memory).canComment) {
-    return { success: false, action: "join_conversation", message: "Rate limited — cannot comment yet" };
-  }
-
-  if (!decision.content) {
-    return { success: false, action: "join_conversation", message: "No reply content provided" };
-  }
-
-  // Validate commentId exists before replying
-  if (decision.commentId && memory.repliedCommentIds.has(decision.commentId)) {
-    return { success: false, action: "join_conversation", message: "Already replied to this comment" };
-  }
-
-  // Hard guard: minimum word count — retry expansion in fresh conversation
-  let content = decision.content;
-  const replyWordCount = content.split(/\s+/).length;
-  if (replyWordCount < getConfig().minReplyWords) {
-    console.log(`   Reply too short (${replyWordCount} words) — expanding in fresh session...`);
-    const expanded = await expandContent(gateway, content, getConfig().minReplyWords, "reply");
-    if (expanded) {
-      content = expanded;
-      console.log(`   Expanded to ${content.split(/\s+/).length} words`);
-    } else {
-      return { success: false, action: "join_conversation", message: `Reply too short (${replyWordCount} words, min ${getConfig().minReplyWords}) — expansion failed, skipping` };
-    }
-  }
-
-  // Pass commentId as parentId for threaded reply
-  const parentId = decision.commentId?.match(/^[0-9a-f-]{36}$/) ? decision.commentId : undefined;
-  const replyResult = await moltbookAgent.comment(decision.postId, content, parentId);
-  if (!replyResult.ok) {
-    if (decision.commentId) memory.repliedCommentIds.add(decision.commentId);
-    return { success: false, action: "join_conversation", message: `Reply failed (${replyResult.error.status}): comment may have been deleted` };
-  }
-
-  memory.totalComments++;
-  memory.commentsToday++;
-  memory.lastCommentAt = Date.now();
-
-  // Record stance
-  memory.stances.push({
-    topic: `joined conversation on ${decision.commentId}`,
-    position: content.slice(0, 100),
-    context: content.slice(0, 300),
-    source: "reply",
-    sourceId: decision.commentId,
-    timestamp: Date.now(),
+  return executeCommentReply(decision, deps, {
+    actionLabel: "join_conversation",
+    stanceTopic: `joined conversation on ${decision.commentId}`,
+    successMessage: `Joined conversation on comment ${decision.commentId} on post ${decision.postId}`,
   });
-  if (memory.stances.length > getConfig().maxStances) {
-    memory.stances = memory.stances.slice(-getConfig().maxStances);
-  }
-
-  // Track this comment ID so we never reply to it again
-  memory.repliedCommentIds.add(decision.commentId);
-
-  // Track per-thread reply count
-  const threadCount = memory.repliedThreadCounts.get(decision.commentId) ?? 0;
-  memory.repliedThreadCounts.set(decision.commentId, threadCount + 1);
-
-  // Mark notifications as read for the post (best effort)
-  const markResult = await moltbookAgent.markNotificationsRead(decision.postId);
-  if (!markResult.ok) {
-    console.log(`   ⚠ markNotificationsRead failed: ${markResult.error.status} ${String(markResult.error.responseBody).slice(0, 200)}`);
-  }
-
-  return {
-    success: true,
-    action: "join_conversation",
-    message: `Joined conversation on comment ${decision.commentId} on post ${decision.postId}`,
-    karmaDelta: 1,
-  };
 }
 
 // ── Dismiss ────────────────────────────────────────────────────────

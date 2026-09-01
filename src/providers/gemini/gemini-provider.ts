@@ -14,11 +14,12 @@
  * - Main agent uses "main", sub-agents get unique keys
  */
 
-import { create, type GemaiClient } from "nimji";
-import { http } from "../http/index.js";
-import { saveCookies, loadCookies, loadConversation, saveConversation } from "../session-manager.js";
-import type { GenerateRequest, GenerateResponse, Provider, ProviderCapabilities, ProviderConfig } from "./types.js";
-import type { ProxyManager } from "../proxy.js";
+import { create, type GemaiClient, type ConversationState } from "nimji";
+import { saveCookies, loadCookies, loadConversation, saveConversation } from "../../session-manager.js";
+import type { GenerateRequest, GenerateResponse, Provider, ProviderCapabilities, ProviderConfig } from "../types.js";
+import type { ProxyManager } from "../../proxy.js";
+import { refreshSession, browserinfoKeepalive, directFetch, type BardUtilsFetchFn } from "./bard-utils.js";
+import { classifyResponse } from "./classify.js";
 
 export type GeminiProviderConfig = ProviderConfig & {
   /** Browser session cookies for Gemini web API */
@@ -34,145 +35,6 @@ export type GeminiProviderConfig = ProviderConfig & {
   /** Optional proxy manager for Pterodactyl environments */
   readonly proxyManager?: ProxyManager;
 };
-
-// ─── Session refresh via bard-utils ───
-
-async function refreshSession(opts: {
-  readonly cookies: string;
-  readonly userAgent?: string;
-  readonly deep?: boolean;
-  readonly force?: boolean;
-  readonly baseUrl?: string;
-  /** Custom fetch function that routes through proxy if set */
-  readonly fetchFn?: (url: string, opts: { method?: string; body?: string; headers?: Record<string, string> }) => Promise<{ status: number; body: string }>;
-}): Promise<{ cookies: string; fSid: string; atToken: string } | null> {
-  const baseUrl = opts.baseUrl ?? "https://bard-utils.onrender.com";
-  const ua = "nimji/0.2.1 (github.com/Mra1k3r0/nimji)";
-  const fetch = opts.fetchFn ?? directFetch;
-
-  try {
-    // Step 1: Get auth token
-    const tokenRes = await fetch(`${baseUrl}/api/auth/token`, {
-      method: "POST",
-      headers: { "content-type": "application/json", "x-nimji-ua": ua },
-      body: "{}",
-    });
-    if (process.env.DEBUG) {
-      console.log(`[gemini-provider] Token fetch: status=${tokenRes.status} via ${opts.fetchFn ? "proxy" : "direct"}`);
-    }
-    if (tokenRes.status !== 200) {
-      if (process.env.DEBUG) console.log(`[gemini-provider] Token failed: ${tokenRes.body.slice(0, 200)}`);
-      return null;
-    }
-    const tokenData = JSON.parse(tokenRes.body) as { ok: boolean; data?: { token: string } };
-    if (!tokenData.ok || !tokenData.data) return null;
-
-    // Step 2: Refresh cookies
-    const refreshRes = await fetch(`${baseUrl}/api/refresh`, {
-      method: "POST",
-      headers: {
-        "content-type": "application/json",
-        authorization: `Bearer ${tokenData.data.token}`,
-        "x-nimji-ua": ua,
-      },
-      body: JSON.stringify({
-        cookies: opts.cookies,
-        ...(opts.userAgent ? { userAgent: opts.userAgent } : {}),
-        ...(opts.deep ? { deep: true } : {}),
-        ...(opts.force ? { force: true } : {}),
-      }),
-    });
-    if (refreshRes.status !== 200) {
-      if (process.env.DEBUG) console.log(`[gemini-provider] Refresh failed: status=${refreshRes.status} ${refreshRes.body.slice(0, 200)}`);
-      return null;
-    }
-    const refreshData = JSON.parse(refreshRes.body) as {
-      ok: boolean;
-      data?: { cookies: string; fSid: string; atToken: string };
-    };
-    if (!refreshData.ok || !refreshData.data) {
-      if (process.env.DEBUG) console.log(`[gemini-provider] Refresh response not ok: ${refreshRes.body.slice(0, 200)}`);
-      return null;
-    }
-
-    return {
-      cookies: refreshData.data.cookies,
-      fSid: refreshData.data.fSid ?? "",
-      atToken: refreshData.data.atToken ?? "",
-    };
-  } catch (err: any) {
-    if (process.env.DEBUG) console.log(`[gemini-provider] Refresh error: ${err.message}`);
-    return null;
-  }
-}
-
-/** Direct HTTP fetch (no proxy) — uses undici */
-async function directFetch(url: string, opts: { method?: string; body?: string; headers?: Record<string, string> }): Promise<{ status: number; body: string }> {
-  const res = await http<{ status: number; body: string }>(url, {
-    method: (opts.method as any) ?? "POST",
-    headers: opts.headers,
-    body: opts.body ? JSON.parse(opts.body) : {},
-  });
-  return { status: res.status, body: typeof res.data === "string" ? res.data : JSON.stringify(res.data) };
-}
-
-// ─── Bard-utils browserinfo keepalive ───
-
-/**
- * Bard-utils browserinfo keepalive — pings Google's identity surface
- * to keep the at token fresh. This is NOT nimji's keepalive timer
- * (which handles per-request cookie rotation internally).
- *
- * Calls POST /api/browserinfo on bard-utils. Returns updated cookies on success.
- */
-async function browserinfoKeepalive(opts: {
-  readonly cookies: string;
-  readonly baseUrl: string;
-  readonly token: string;
-  readonly fetchFn?: (url: string, opts: { method?: string; body?: string; headers?: Record<string, string> }) => Promise<{ status: number; body: string }>;
-}): Promise<string | false> {
-  const fetchFn = opts.fetchFn ?? directFetch;
-  const { baseUrl, cookies, token } = opts;
-
-  try {
-    // POST /api/browserinfo — use provided token, no mint call
-    const biRes = await fetchFn(`${baseUrl}/api/browserinfo`, {
-      method: "POST",
-      headers: {
-        "content-type": "application/json",
-        authorization: `Bearer ${token}`,
-      },
-      body: JSON.stringify({ cookies }),
-    });
-    if (biRes.status !== 200) return false;
-
-    const data = JSON.parse(biRes.body) as {
-      ok: boolean;
-      data?: { cookies: string; statusCode: number; rotatedCount: number };
-    };
-    if (!data.ok || !data.data) return false;
-
-    console.log(`[keepalive] browserinfo ${data.data.statusCode} — ${data.data.rotatedCount} cookies rotated`);
-
-    // Return updated cookies (browserinfo may rotate SIDCC etc.)
-    return data.data.cookies;
-  } catch (err) {
-    console.log("[keepalive] browserinfo failed:", err);
-    return false;
-  }
-}
-
-// ─── Response quality classification (from nimji CLI) ───
-
-function classifyResponse(value: {
-  text: string | null;
-  meta: { statusCode: number; chunkCount: number; rawSize: number };
-}): string {
-  if (value.meta.statusCode !== 200) return "partial_stream";
-  if (value.meta.chunkCount <= 1 || value.meta.rawSize < 220) return "partial_stream";
-  if (!value.text || value.text.trim().length === 0) return "no_text";
-  return "none";
-}
 
 // ─── Gemini provider ───
 
@@ -341,7 +203,7 @@ export class GeminiProvider implements Provider {
   }
 
   /** Returns a fetch function that routes through the proxy manager if available */
-  private getProxyFetch(): ((url: string, opts: { method?: string; body?: string; headers?: Record<string, string> }) => Promise<{ status: number; body: string }>) | undefined {
+  private getProxyFetch(): BardUtilsFetchFn | undefined {
     if (!this.proxyManager) return undefined;
     const mgr = this.proxyManager;
     const base = this.bardUtilsUrl.replace(/\/$/, "");
@@ -511,7 +373,7 @@ export class GeminiProvider implements Provider {
 
     // If a different conversationKey is requested, temporarily switch conversations
     const useSeparateConvo = request.conversationKey && request.conversationKey !== this.conversationKey;
-    let savedConvo = null;
+    let savedConvo: ConversationState | null = null;
     if (useSeparateConvo) {
       savedConvo = this.client.getConversation();
       const altConvo = loadConversation(request.conversationKey);
@@ -619,9 +481,9 @@ export class GeminiProvider implements Provider {
     }
 
     saveConversation(this.conversationKey, {
-      conversationId: useSeparateConvo && savedConvo ? (savedConvo as any).conversationId : conv.conversationId,
-      responseId: useSeparateConvo && savedConvo ? (savedConvo as any).responseId : conv.responseId,
-      choiceId: useSeparateConvo && savedConvo ? (savedConvo as any).choiceId : conv.choiceId,
+      conversationId: useSeparateConvo && savedConvo ? savedConvo.conversationId : conv.conversationId,
+      responseId: useSeparateConvo && savedConvo ? savedConvo.responseId : conv.responseId,
+      choiceId: useSeparateConvo && savedConvo ? savedConvo.choiceId : conv.choiceId,
     });
 
     const res = result.value;

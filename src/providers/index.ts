@@ -12,4 +12,4 @@ export type {
   Provider,
 } from "./types.js";
 
-export { GeminiProvider, createGeminiProvider, type GeminiProviderConfig } from "./gemini.js";
+export { GeminiProvider, createGeminiProvider, type GeminiProviderConfig } from "./gemini/index.js";

@@ -17,8 +17,7 @@ import { readFileSync, writeFileSync, existsSync, mkdirSync } from "node:fs";
 import { resolve } from "node:path";
 import type { PostSummary, TaskQueueItem, ActivitySummary, Stance, ForeignStance } from "./types.js";
 
-// Re-export from types for backward compatibility
-export type { PostSummary, AgentInteraction, TaskStatus, TaskQueueItem, ActivitySummary } from "./types.js";
+export type { ActivitySummary } from "./types.js";
 
 // ── Summary Generator ────────────────────────────────────────────────
 
