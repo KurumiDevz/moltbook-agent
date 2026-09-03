@@ -30,6 +30,10 @@ export type GeminiProviderConfig = ProviderConfig & {
   readonly conversationKey?: string;
   /** Use deep browser session refresh via bard-utils (default: false) */
   readonly deepRefresh?: boolean;
+  /** Enable nimji's internal cookie rotation timer (default: false).
+   *  When false, our refreshTimer handles cookie rotation.
+   *  When true, nimji's 8-min rotateTimer calls /api/refresh in addition to ours. */
+  readonly enableNimjiRotation?: boolean;
   /** bard-utils API base URL (default: https://bard-utils.onrender.com) */
   readonly bardUtilsUrl?: string;
   /** Optional proxy manager for Pterodactyl environments */
@@ -55,6 +59,7 @@ export class GeminiProvider implements Provider {
   private effectiveAtToken: string = "";
   private deepRefresh: boolean = false;
   private forceRefresh: boolean = false;
+  private enableNimjiRotation: boolean = false;
   private bardUtilsUrl: string = "https://bard-utils.onrender.com";
   private proxyManager: ProxyManager | null = null;
   private cachedToken: string | null = null;
@@ -65,8 +70,13 @@ export class GeminiProvider implements Provider {
     this.conversationKey = "main";
   }
 
-  /** Create nimji client with our standard config. nimji's internal keepalive (batchexecute ping + cookie rotation) is enabled by default — this keeps sessions alive even if our refresh cycle misses. */
+  /** Create nimji client with our standard config.
+   *  nimji's batchexecute keepalive runs by default (keeps session warm).
+   *  nimji's cookie rotation is controlled by ENABLE_NIMJI_ROTATE (default: off).
+   *  When off, our 20-min refreshTimer handles cookie rotation exclusively. */
   private createClient(cookies: string, opts?: { atToken?: string; fSid?: string; extra?: Record<string, unknown> }) {
+    // nimji reads KEEPALIVE_ROTATE_ENABLED from process.env at create() time
+    process.env.KEEPALIVE_ROTATE_ENABLED = this.enableNimjiRotation ? "1" : "0";
     return create({
       COOKIES: cookies,
       MODEL: this.defaultModel,
@@ -83,6 +93,8 @@ export class GeminiProvider implements Provider {
     this.conversationKey = config.conversationKey ?? "main";
     this.deepRefresh = (config.options?.deepRefresh as boolean) ?? false;
     this.forceRefresh = (config.options?.forceRefresh as boolean) ?? false;
+    this.enableNimjiRotation = (config.options?.enableNimjiRotation as boolean)
+      ?? process.env.ENABLE_NIMJI_ROTATION === "true";
     this.bardUtilsUrl = (config.options?.bardUtilsUrl as string) ?? "https://bard-utils.onrender.com";
     this.proxyManager = (config.options?.proxyManager as ProxyManager) ?? null;
     this.keepaliveIntervalMs = (config.options?.keepaliveIntervalMs as number) ?? 120_000;
@@ -136,7 +148,8 @@ export class GeminiProvider implements Provider {
 
     // Start keepalive timers:
     // - browserinfo every 2 min (our code — keeps at token fresh)
-    // - nimji batchexecute every 8 min (nimji internal — keeps session alive, UNTESTED)
+    // - nimji batchexecute every 10 min (nimji internal — keeps session warm)
+    // - nimji cookie rotation every 8 min (nimji internal — only if ENABLE_NIMJI_ROTATION=true)
     // - full refresh every 20 min (our code — rotate cookies + fSid + atToken)
     this.startKeepalive();
   }
@@ -146,10 +159,9 @@ export class GeminiProvider implements Provider {
 
     // ── Bard-utils browserinfo keepalive (every 2 min) ──
     // Pings Google's identity surface to keep the at token fresh.
-    // This is separate from nimji's internal keepalive (batchexecute + cookie rotation).
-    // nimji runs its own 8-min timers for session warmth + cookie rotation.
-    // This browserinfo ping specifically keeps the at token fresh via
-    // myaccount.google.com/_/AccountSettingsUi/browserinfo.
+    // nimji's batchexecute keepalive (10 min) keeps the session warm.
+    // nimji's cookie rotation (8 min) is disabled by default — our 20-min refreshTimer handles it.
+    // Set ENABLE_NIMJI_ROTATION=true to also run nimji's rotation as a safety net.
     if (this.enableBrowserinfo) {
       this.keepaliveTimer = setInterval(async () => {
         try {
