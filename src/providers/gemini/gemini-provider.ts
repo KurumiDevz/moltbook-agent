@@ -65,18 +65,17 @@ export class GeminiProvider implements Provider {
     this.conversationKey = "main";
   }
 
-  /** Create nimji client with our standard config (keepalive disabled, timeouts, etc.) */
+  /** Create nimji client with our standard config. nimji's internal keepalive (batchexecute ping + cookie rotation) is enabled by default — this keeps sessions alive even if our refresh cycle misses. */
   private createClient(cookies: string, opts?: { atToken?: string; fSid?: string; extra?: Record<string, unknown> }) {
     return create({
       COOKIES: cookies,
       MODEL: this.defaultModel,
       STREAM_IDLE_TIMEOUT_MS: "120000",
       STREAM_MAX_DURATION_MS: "600000",
-      KEEPALIVE_ROTATE_ENABLED: "0",
       ...(opts?.atToken ? { AT_TOKEN: opts.atToken } : {}),
       ...(opts?.fSid ? { F_SID: opts.fSid } : {}),
       ...(opts?.extra ?? {}),
-    }, { keepalive: false });
+    });
   }
 
   async initialize(config: GeminiProviderConfig): Promise<void> {
@@ -147,8 +146,9 @@ export class GeminiProvider implements Provider {
 
     // ── Bard-utils browserinfo keepalive (every 2 min) ──
     // Pings Google's identity surface to keep the at token fresh.
-    // This is NOT nimji's keepalive — nimji handles per-request cookie rotation.
-    // This calls POST /api/browserinfo on bard-utils, which hits
+    // This is separate from nimji's internal keepalive (batchexecute + cookie rotation).
+    // nimji runs its own 8-min timers for session warmth + cookie rotation.
+    // This browserinfo ping specifically keeps the at token fresh via
     // myaccount.google.com/_/AccountSettingsUi/browserinfo.
     if (this.enableBrowserinfo) {
       this.keepaliveTimer = setInterval(async () => {
