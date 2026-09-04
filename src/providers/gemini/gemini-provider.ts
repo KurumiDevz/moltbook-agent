@@ -77,6 +77,8 @@ export class GeminiProvider implements Provider {
   private createClient(cookies: string, opts?: { atToken?: string; fSid?: string; extra?: Record<string, unknown> }) {
     // nimji reads KEEPALIVE_ROTATE_ENABLED from process.env at create() time
     process.env.KEEPALIVE_ROTATE_ENABLED = this.enableNimjiRotation ? "1" : "0";
+    // Filter out keys that we set explicitly — spreading config.options would overwrite them
+    const { cookies: _c, COOKIES: _co, AT_TOKEN: _at, F_SID: _fs, MODEL: _m, ...safeExtra } = (opts?.extra ?? {}) as Record<string, unknown>;
     return create({
       COOKIES: cookies,
       MODEL: this.defaultModel,
@@ -84,7 +86,7 @@ export class GeminiProvider implements Provider {
       STREAM_MAX_DURATION_MS: "600000",
       ...(opts?.atToken ? { AT_TOKEN: opts.atToken } : {}),
       ...(opts?.fSid ? { F_SID: opts.fSid } : {}),
-      ...(opts?.extra ?? {}),
+      ...safeExtra,
     });
   }
 
