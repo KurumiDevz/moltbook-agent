@@ -74,11 +74,9 @@ export class GeminiProvider implements Provider {
    *  nimji's batchexecute keepalive runs by default (keeps session warm).
    *  nimji's cookie rotation is controlled by ENABLE_NIMJI_ROTATE (default: off).
    *  When off, our 20-min refreshTimer handles cookie rotation exclusively. */
-  private createClient(cookies: string, opts?: { atToken?: string; fSid?: string; extra?: Record<string, unknown> }) {
+  private createClient(cookies: string, opts?: { atToken?: string; fSid?: string }) {
     // nimji reads KEEPALIVE_ROTATE_ENABLED from process.env at create() time
     process.env.KEEPALIVE_ROTATE_ENABLED = this.enableNimjiRotation ? "1" : "0";
-    // Filter out keys that we set explicitly — spreading config.options would overwrite them
-    const { cookies: _c, COOKIES: _co, AT_TOKEN: _at, F_SID: _fs, MODEL: _m, ...safeExtra } = (opts?.extra ?? {}) as Record<string, unknown>;
     return create({
       COOKIES: cookies,
       MODEL: this.defaultModel,
@@ -86,7 +84,10 @@ export class GeminiProvider implements Provider {
       STREAM_MAX_DURATION_MS: "600000",
       ...(opts?.atToken ? { AT_TOKEN: opts.atToken } : {}),
       ...(opts?.fSid ? { F_SID: opts.fSid } : {}),
-      ...safeExtra,
+      // Intentionally do NOT spread opts.extra — the old code ignored it entirely.
+      // Spreading config.options into nimji can pollute its internal state and cause
+      // Google to hang on generate(). Each key we need (COOKIES, MODEL, AT_TOKEN, F_SID)
+      // is already set explicitly above.
     });
   }
 
@@ -141,7 +142,6 @@ export class GeminiProvider implements Provider {
     this.client = this.createClient(cookies, {
       atToken: refresh?.atToken,
       fSid: refresh?.fSid,
-      extra: config.options,
     });
 
     // Don't restore stale conversation — start fresh each startup
@@ -325,7 +325,6 @@ export class GeminiProvider implements Provider {
     this.client = this.createClient(refresh.cookies, {
       atToken: this.effectiveAtToken,
       fSid: this.effectiveFSid,
-      extra: this.config.options,
     });
 
     // Restore conversation state
@@ -429,7 +428,6 @@ export class GeminiProvider implements Provider {
       const retryClient = this.createClient(this.effectiveCookies, {
         atToken: this.effectiveAtToken,
         fSid: this.effectiveFSid,
-        extra: this.config?.options,
       });
       retryClient.setConversation(conversationState);
 
@@ -445,7 +443,6 @@ export class GeminiProvider implements Provider {
         const freshClient = this.createClient(this.effectiveCookies, {
           atToken: this.effectiveAtToken,
           fSid: this.effectiveFSid,
-          extra: this.config?.options,
         });
         const recovered = await freshClient.generate(generateOptions);
         if (recovered.isOk()) {
@@ -471,7 +468,6 @@ export class GeminiProvider implements Provider {
       const freshClient = this.createClient(this.effectiveCookies, {
         atToken: this.effectiveAtToken,
         fSid: this.effectiveFSid,
-        extra: this.config?.options,
       });
       const retryResult = await freshClient.generate(generateOptions);
       if (retryResult.isOk()) {
